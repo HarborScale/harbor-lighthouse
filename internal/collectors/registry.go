@@ -12,6 +12,8 @@ func Get(name string) (Collector, error) {
 		return SystemCollector, nil
 	case "meshtastic":
 		return MeshtasticCollector, nil
+	case "exec", "script", "custom":
+		return ExecCollector, nil
 	default:
 		return nil, fmt.Errorf("unknown source: %s", name)
 	}

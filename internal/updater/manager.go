@@ -9,7 +9,7 @@ import (
 )
 
 // CHANGE THIS TO YOUR REPO
-const RepoSlug = "harborscale/lighthouse"
+const RepoSlug = "harborscale/harbor-lighthouse"
 
 func StartBackgroundChecker(currentVer string, enabled bool) {
 	if !enabled || currentVer == "dev" { return }
