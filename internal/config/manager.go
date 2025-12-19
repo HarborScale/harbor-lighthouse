@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 const ConfigFileName = "lighthouse_config.json"
@@ -15,8 +16,8 @@ type Instance struct {
 	Source       string            `json:"source"`
 	HarborType   string            `json:"harbor_type"`
 	Params       map[string]string `json:"params"`
-	Interval     int               `json:"interval"`       // Seconds between runs
-	MaxBatchSize int               `json:"max_batch_size"` // Max items per POST
+	Interval     int               `json:"interval"`
+	MaxBatchSize int               `json:"max_batch_size"`
 }
 
 type Config struct {
@@ -24,19 +25,42 @@ type Config struct {
 	Instances  []Instance `json:"instances"`
 }
 
+// getConfigPath returns the absolute path to the config file
+// located next to the running binary.
+func getConfigPath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		// Fallback to current directory if we can't find self (rare)
+		return ConfigFileName
+	}
+	return filepath.Join(filepath.Dir(exePath), ConfigFileName)
+}
+
 func Load() (Config, error) {
 	c := Config{AutoUpdate: true, Instances: []Instance{}}
-	data, err := os.ReadFile(ConfigFileName)
-	if os.IsNotExist(err) { return c, nil }
-	if err != nil { return c, err }
+
+	path := getConfigPath()
+	data, err := os.ReadFile(path)
+
+	if os.IsNotExist(err) {
+		return c, nil
+	}
+	if err != nil {
+		return c, err
+	}
+
 	err = json.Unmarshal(data, &c)
 	return c, nil
 }
 
 func Save(c Config) error {
 	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil { return err }
-	return os.WriteFile(ConfigFileName, data, 0644)
+	if err != nil {
+		return err
+	}
+
+	path := getConfigPath()
+	return os.WriteFile(path, data, 0o644)
 }
 
 func (c *Config) Add(n Instance) error {
