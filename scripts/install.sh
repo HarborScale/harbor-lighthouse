@@ -2,6 +2,29 @@
 VERSION="v0.0.7" # UPDATE THIS
 REPO="harborscale/harbor-lighthouse"
 
+# --- 🗑️ UNINSTALL MODE ---
+if [ "$1" == "--uninstall" ]; then
+    echo "🧹 Uninstalling Harbor Lighthouse..."
+
+    # 1. Ask binary to remove the Service
+    if command -v lighthouse &> /dev/null; then
+        lighthouse --uninstall
+    fi
+
+    # 2. Remove the binary file
+    if [ -f "/usr/local/bin/lighthouse" ]; then
+        sudo rm /usr/local/bin/lighthouse
+        echo "✅ Binary removed from /usr/local/bin"
+    else
+        echo "ℹ️  Binary not found (already removed?)"
+    fi
+
+    echo "✅ Uninstallation complete."
+    exit 0
+fi
+# -------------------------
+
+# --- 🚢 INSTALL MODE ---
 echo "🚢 Installing Harbor Lighthouse $VERSION..."
 OS="$(uname -s)"
 ARCH="$(uname -m)"
