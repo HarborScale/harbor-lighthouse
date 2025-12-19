@@ -83,7 +83,7 @@ When running `lighthouse --add`, you can use these flags to customize behavior:
 | `--key` | ❌ No | Your API Key (if required by your Harbor). | - |
 | `--source` | ✅ Yes | Which collector to use (`linux`, `windows`, `exec`). | `linux` |
 | `--interval` | ❌ No | How often to collect data (in seconds). | `60` |
-| `--batch-size` | ❌ No | Max number of metrics to send in one HTTP request. | `100` |
+| `--batch-size` | ❌ No | Max number of metrics to send in one HTTP request. | `10` |
 | `--param` | ❌ No | Pass specific settings to a collector. | - |
 
 ---
