@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/harborscale/lighthouse/internal/collectors"
-	"github.com/harborscale/lighthouse/internal/config"
-	"github.com/harborscale/lighthouse/internal/engine"
-	"github.com/harborscale/lighthouse/internal/service"
-	"github.com/harborscale/lighthouse/internal/status"
-	"github.com/harborscale/lighthouse/internal/transport"
-	"github.com/harborscale/lighthouse/internal/updater"
+	"github.com/harborscale/harbor-lighthouse/internal/collectors"
+	"github.com/harborscale/harbor-lighthouse/internal/config"
+	"github.com/harborscale/harbor-lighthouse/internal/engine"
+	"github.com/harborscale/harbor-lighthouse/internal/service"
+	"github.com/harborscale/harbor-lighthouse/internal/status"
+	"github.com/harborscale/harbor-lighthouse/internal/transport"
+	"github.com/harborscale/harbor-lighthouse/internal/updater"
 )
 
 //go:embed definitions.json
@@ -59,6 +59,9 @@ func main() {
 	key := flag.String("key", "", "API Key")
 	src := flag.String("source", "linux", "Source (linux, exec)")
 	typ := flag.String("type", "general", "Harbor Type (general, gps)")
+
+	// OSS / Custom Endpoint Flag
+	endpoint := flag.String("endpoint", "", "Custom API URL (e.g. http://localhost:8080)")
 
 	// Rate Limiting Flags
 	interval := flag.Int("interval", 60, "Collection interval in seconds")
@@ -124,22 +127,30 @@ func main() {
 	}
 
 	if *add {
-		if *name == "" || *harborID == "" {
-			log.Fatal("❌ Error: --name and --harbor-id are required")
+		// VALIDATION LOGIC
+		if *name == "" {
+			log.Fatal("❌ Error: --name is required")
 		}
+		// If using Cloud (no endpoint), HarborID is required.
+		// If using OSS (endpoint set), HarborID is optional.
+		if *endpoint == "" && *harborID == "" {
+			log.Fatal("❌ Error: --harbor-id is required for Cloud usage")
+		}
+
 		cfg, _ := config.Load()
 		instance := config.Instance{
 			Name: *name, HarborID: *harborID, APIKey: *key,
 			Source: *src, HarborType: *typ, Params: params,
 			Interval:     *interval,
 			MaxBatchSize: *batchSize,
+			Endpoint:     *endpoint, // Save custom URL
 		}
 		if err := cfg.Add(instance); err != nil {
 			log.Fatal("❌", err)
 		}
 		config.Save(cfg)
 		fmt.Println("✅ Added instance.")
-		reloadService() // <--- AUTO RESTART
+		reloadService() // Auto Restart
 		return
 	}
 
@@ -148,7 +159,7 @@ func main() {
 		if cfg.Remove(*remove) {
 			config.Save(cfg)
 			fmt.Println("🗑️ Removed instance.")
-			reloadService() // <--- AUTO RESTART
+			reloadService() // Auto Restart
 		} else {
 			fmt.Println("❌ Instance not found.")
 		}
@@ -161,7 +172,6 @@ func main() {
 	}
 }
 
-// runDaemon is the main entry point for the background service
 func runDaemon() {
 	setupLogging()
 	log.Printf("🚢 Harbor Lighthouse %s Starting...", Version)
@@ -171,18 +181,15 @@ func runDaemon() {
 	// Background Auto-Update
 	go updater.StartBackgroundChecker(Version, cfg.AutoUpdate)
 
-	// --- 🛡️ CRASH PREVENTION: IDLE MODE ---
-	// If no instances exist, we must NOT exit, or the OS will think the service crashed.
+	// --- IDLE MODE (Prevents Service Crash) ---
 	if len(cfg.Instances) == 0 {
 		log.Println("💤 No instances configured. Entering Idle Mode.")
-		// We enter a blocking loop. The service manager will kill this process
-		// when we run 'reloadService' or 'stop'.
 		for {
 			time.Sleep(1 * time.Hour)
 		}
 	}
 
-	// --- NORMAL MODE ---
+	// --- WORKER MODE ---
 	var wg sync.WaitGroup
 	for _, inst := range cfg.Instances {
 		wg.Add(1)
@@ -197,11 +204,10 @@ func runDaemon() {
 func worker(inst config.Instance) {
 	prefix := fmt.Sprintf("[%s]", inst.Name)
 
-	// Default Fallbacks
 	if inst.Interval < 1 { inst.Interval = 60 }
 	if inst.MaxBatchSize < 1 { inst.MaxBatchSize = 10 }
 
-	// 1. Get Mode & URL
+	// 1. Get Mode & Suffix
 	def, err := engine.Get(inst.HarborType)
 	if err != nil {
 		log.Printf("%s ❌ Configuration Error: Unknown Type '%s'", prefix, inst.HarborType)
@@ -209,7 +215,18 @@ func worker(inst config.Instance) {
 		return
 	}
 
-	url := fmt.Sprintf("https://harborscale.com/api/v2/ingest/%s%s", inst.HarborID, def.EndpointSuffix)
+	// --- 🔗 INTELLIGENT URL BUILDER ---
+	var url string
+	if inst.Endpoint != "" {
+		// OSS MODE: Use custom endpoint, NO Harbor ID in path
+		// Format: {Endpoint}/api/v2/ingest{Suffix}
+		cleanBase := strings.TrimRight(inst.Endpoint, "/")
+		url = fmt.Sprintf("%s/api/v2/ingest%s", cleanBase, def.EndpointSuffix)
+	} else {
+		// CLOUD MODE: Use standard URL, INCLUDE Harbor ID
+		// Format: https://harborscale.com/api/v2/ingest/{ID}{Suffix}
+		url = fmt.Sprintf("https://harborscale.com/api/v2/ingest/%s%s", inst.HarborID, def.EndpointSuffix)
+	}
 
 	// 2. Get Collector
 	col, err := collectors.Get(inst.Source)
@@ -221,13 +238,11 @@ func worker(inst config.Instance) {
 
 	log.Printf("%s Started (%s mode) -> %s", prefix, def.Mode, url)
 
-	// DYNAMIC TICKER
 	ticker := time.NewTicker(time.Duration(inst.Interval) * time.Second)
 	defer ticker.Stop()
 
-	// 3. Loop
+	// 3. Collection Loop
 	for {
-		// Wait for tick
 		<-ticker.C
 
 		data, err := col(inst.Params)
@@ -250,7 +265,7 @@ func worker(inst config.Instance) {
 				})
 			}
 
-			// Chunking
+			// Chunking logic
 			totalItems := len(fullList)
 			for i := 0; i < totalItems; i += inst.MaxBatchSize {
 				end := i + inst.MaxBatchSize
@@ -318,7 +333,12 @@ func showStatus() {
 				msg = fmt.Sprintf("Error: %s (%s ago)", s.LastError, ago)
 			}
 		}
-		fmt.Printf("%s [%s] %s -> %s\n     └─ %s\n", icon, i.Name, i.Source, i.HarborID, msg)
+		// Clean display logic for missing HarborID in OSS mode
+		hID := i.HarborID
+		if hID == "" {
+			hID = "OSS"
+		}
+		fmt.Printf("%s [%s] %s -> %s\n     └─ %s\n", icon, i.Name, i.Source, hID, msg)
 	}
 }
 

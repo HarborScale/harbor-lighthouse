@@ -1,4 +1,4 @@
-module github.com/harborscale/lighthouse
+module github.com/harborscale/harbor-lighthouse
 
 go 1.25.4
 

@@ -18,6 +18,7 @@ type Instance struct {
 	Params       map[string]string `json:"params"`
 	Interval     int               `json:"interval"`
 	MaxBatchSize int               `json:"max_batch_size"`
+	Endpoint     string            `json:"endpoint,omitempty"`
 }
 
 type Config struct {
