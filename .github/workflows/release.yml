@@ -1,0 +1,50 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Get dependencies
+        run: |
+          go mod tidy
+          # Ensure cross-compilation deps if needed
+
+      - name: Build Binaries
+        run: |
+          # Inject the Git Tag into the Version variable
+          LDFLAGS="-s -w -X main.Version=${GITHUB_REF#refs/tags/}"
+
+          echo "Building Linux AMD64..."
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-amd64 cmd/lighthouse/main.go
+
+          echo "Building Linux ARM64 (Pi)..."
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-arm64 cmd/lighthouse/main.go
+
+          echo "Building Windows..."
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-windows.exe cmd/lighthouse/main.go
+
+          echo "Building Darwin (Mac)..."
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-darwin-arm64 cmd/lighthouse/main.go
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            lighthouse-linux-amd64
+            lighthouse-linux-arm64
+            lighthouse-windows.exe
+            lighthouse-darwin-arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

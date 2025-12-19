@@ -1,0 +1,14 @@
+{
+  "general": {
+    "mode": "cargo",
+    "endpoint_suffix": ""
+  },
+  "gps": {
+    "mode": "raw",
+    "endpoint_suffix": "/gps"
+  },
+  "ttn": {
+    "mode": "raw",
+    "endpoint_suffix": "/ttn"
+  }
+}
