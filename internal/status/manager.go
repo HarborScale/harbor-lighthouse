@@ -1,50 +1,84 @@
-package status
+package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
-	"sync"
-	"time"
+	"path/filepath"
 )
 
-const StatusFile = "lighthouse_status.json"
+const ConfigFileName = "lighthouse_config.json"
 
-type InstanceStatus struct {
-	LastContact int64  `json:"last_contact"`
-	LastError   string `json:"last_error"`
-	Healthy     bool   `json:"healthy"`
+type Instance struct {
+	Name         string            `json:"name"`
+	HarborID     string            `json:"harbor_id"`
+	APIKey       string            `json:"api_key"`
+	Source       string            `json:"source"`
+	HarborType   string            `json:"harbor_type"`
+	Params       map[string]string `json:"params"`
+	Interval     int               `json:"interval"`
+	MaxBatchSize int               `json:"max_batch_size"`
 }
 
-type StatusDB struct {
-	Instances map[string]InstanceStatus `json:"instances"`
-	mu        sync.Mutex
+type Config struct {
+	AutoUpdate bool       `json:"auto_update"`
+	Instances  []Instance `json:"instances"`
 }
 
-var db = StatusDB{Instances: make(map[string]InstanceStatus)}
+// getConfigPath returns the absolute path to the config file
+// located next to the running binary.
+func getConfigPath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		// Fallback to current directory if we can't find self (rare)
+		return ConfigFileName
+	}
+	return filepath.Join(filepath.Dir(exePath), ConfigFileName)
+}
 
-func Update(name string, err error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
+func Load() (Config, error) {
+	c := Config{AutoUpdate: true, Instances: []Instance{}}
 
-	s := InstanceStatus{
-		LastContact: time.Now().Unix(),
-		Healthy:     err == nil,
+	path := getConfigPath()
+	data, err := os.ReadFile(path)
+
+	if os.IsNotExist(err) {
+		return c, nil
 	}
 	if err != nil {
-		s.LastError = err.Error()
+		return c, err
 	}
 
-	db.Instances[name] = s
-
-	// Save to disk asynchronously or immediately? Immediately for simplicity.
-	data, _ := json.Marshal(db)
-	os.WriteFile(StatusFile, data, 0644)
+	err = json.Unmarshal(data, &c)
+	return c, nil
 }
 
-func Load() map[string]InstanceStatus {
-	data, err := os.ReadFile(StatusFile)
-	if err != nil { return make(map[string]InstanceStatus) }
-	var temp StatusDB
-	json.Unmarshal(data, &temp)
-	return temp.Instances
+func Save(c Config) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	path := getConfigPath()
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (c *Config) Add(n Instance) error {
+	for _, i := range c.Instances {
+		if i.Name == n.Name {
+			return fmt.Errorf("instance '%s' already exists", n.Name)
+		}
+	}
+	c.Instances = append(c.Instances, n)
+	return nil
+}
+
+func (c *Config) Remove(n string) bool {
+	for i, v := range c.Instances {
+		if v.Name == n {
+			c.Instances = append(c.Instances[:i], c.Instances[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
