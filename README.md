@@ -8,22 +8,23 @@ Lighthouse is a tiny, single-binary agent that runs on any computer (Linux, Mac,
 
 
 ---
-
 ## ⚡ Installation
+
+We provide a universal installer that automatically detects your OS and architecture.
 
 ### 🐧 Linux / 🍎 macOS / 🥧 Raspberry Pi
 Copy and paste this into your terminal:
 ```bash
-curl -sL [https://downloads.harborscale.com/install.sh](https://downloads.harborscale.com/install.sh) | sudo bash
-
+curl -sL get.harborscale.com | sudo bash
 ```
+🪟 Windows (PowerShell)
 
-### 🪟 Windows
+Open PowerShell as Administrator and run:
 
-1. Download the latest `.exe` from the [suspicious link removed].
-2. Open PowerShell as Administrator.
-3. Run: `.\lighthouse.exe --install`
-
+```PowerShell
+iwr get.harborscale.com | iex
+```
+> **Note:** This installs Lighthouse as a system service. It will start automatically on boot.
 ---
 
 ## 🎮 How to Use
