@@ -10,8 +10,6 @@ func Get(name string) (Collector, error) {
 	switch name {
 	case "linux", "system", "windows", "macos":
 		return SystemCollector, nil
-	case "meshtastic":
-		return MeshtasticCollector, nil
 	case "exec", "script", "custom":
 		return ExecCollector, nil
 	default:
