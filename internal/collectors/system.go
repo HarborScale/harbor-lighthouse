@@ -37,10 +37,9 @@ func SystemCollector(params map[string]string) (map[string]interface{}, error) {
 	h, err := host.Info()
 	if err == nil {
 		data["uptime_hours"] = h.Uptime / 3600
-		data["os"] = h.OS
 	}
 
-	data["arch"] = runtime.GOARCH
+
 
 	return data, nil
 }
