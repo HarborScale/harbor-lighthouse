@@ -1,5 +1,5 @@
 param([switch]$Uninstall)
-$Version = "v0.0.7"
+$Version = "v0.0.8"
 $Repo = "harborscale/harbor-lighthouse"
 $InstallDir = "C:\Program Files\HarborLighthouse"
 $ExePath = "$InstallDir\lighthouse.exe"
