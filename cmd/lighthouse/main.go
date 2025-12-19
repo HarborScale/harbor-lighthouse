@@ -60,7 +60,7 @@ func main() {
 
 	// Rate Limiting Flags
 	interval := flag.Int("interval", 60, "Collection interval in seconds")
-	batchSize := flag.Int("batch-size", 100, "Max items per HTTP request")
+	batchSize := flag.Int("batch-size", 10, "Max items per HTTP request")
 
 	params := make(paramFlags)
 	flag.Var(&params, "param", "Key=Value params")
@@ -186,7 +186,7 @@ func worker(inst config.Instance) {
 
 	// Default Fallbacks
 	if inst.Interval < 1 { inst.Interval = 60 }
-	if inst.MaxBatchSize < 1 { inst.MaxBatchSize = 100 }
+	if inst.MaxBatchSize < 1 { inst.MaxBatchSize = 10 }
 
 	// 1. Get Mode & URL
 	def, err := engine.Get(inst.HarborType)
