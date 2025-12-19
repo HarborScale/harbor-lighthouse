@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +57,7 @@ func main() {
 	name := flag.String("name", "", "Instance Name (ship_id)")
 	harborID := flag.String("harbor-id", "", "Harbor ID")
 	key := flag.String("key", "", "API Key")
-	src := flag.String("source", "linux", "Source (linux, meshtastic)")
+	src := flag.String("source", "linux", "Source (linux, exec)")
 	typ := flag.String("type", "general", "Harbor Type (general, gps)")
 
 	// Rate Limiting Flags
@@ -136,7 +138,8 @@ func main() {
 			log.Fatal("❌", err)
 		}
 		config.Save(cfg)
-		fmt.Println("✅ Added instance. Restart service to apply.")
+		fmt.Println("✅ Added instance.")
+		reloadService() // <--- AUTO RESTART
 		return
 	}
 
@@ -145,6 +148,7 @@ func main() {
 		if cfg.Remove(*remove) {
 			config.Save(cfg)
 			fmt.Println("🗑️ Removed instance.")
+			reloadService() // <--- AUTO RESTART
 		} else {
 			fmt.Println("❌ Instance not found.")
 		}
@@ -157,6 +161,7 @@ func main() {
 	}
 }
 
+// runDaemon is the main entry point for the background service
 func runDaemon() {
 	setupLogging()
 	log.Printf("🚢 Harbor Lighthouse %s Starting...", Version)
@@ -166,10 +171,18 @@ func runDaemon() {
 	// Background Auto-Update
 	go updater.StartBackgroundChecker(Version, cfg.AutoUpdate)
 
+	// --- 🛡️ CRASH PREVENTION: IDLE MODE ---
+	// If no instances exist, we must NOT exit, or the OS will think the service crashed.
 	if len(cfg.Instances) == 0 {
-		log.Println("⚠️  No instances configured. Sleeping.")
+		log.Println("💤 No instances configured. Entering Idle Mode.")
+		// We enter a blocking loop. The service manager will kill this process
+		// when we run 'reloadService' or 'stop'.
+		for {
+			time.Sleep(1 * time.Hour)
+		}
 	}
 
+	// --- NORMAL MODE ---
 	var wg sync.WaitGroup
 	for _, inst := range cfg.Instances {
 		wg.Add(1)
@@ -210,6 +223,7 @@ func worker(inst config.Instance) {
 
 	// DYNAMIC TICKER
 	ticker := time.NewTicker(time.Duration(inst.Interval) * time.Second)
+	defer ticker.Stop()
 
 	// 3. Loop
 	for {
@@ -225,8 +239,6 @@ func worker(inst config.Instance) {
 
 		if def.Mode == "cargo" {
 			// --- CARGO MODE (BATCHED) ---
-
-			// 1. Flatten Data into a List
 			var fullList []transport.CargoPayload
 
 			for k, v := range data {
@@ -238,26 +250,21 @@ func worker(inst config.Instance) {
 				})
 			}
 
-			// 2. CHUNK IT (Respect MaxBatchSize)
+			// Chunking
 			totalItems := len(fullList)
 			for i := 0; i < totalItems; i += inst.MaxBatchSize {
 				end := i + inst.MaxBatchSize
 				if end > totalItems { end = totalItems }
 
 				batchChunk := fullList[i:end]
-
-				// 3. Send Batch
 				err := transport.SendBatch(url+"/batch", inst.APIKey, batchChunk)
 
 				if err != nil {
 					log.Printf("%s ⚠️ Batch Send Error: %v", prefix, err)
-
-					// Smart Cool-down for 429
 					if strings.Contains(err.Error(), "429") {
 						log.Printf("%s 🛑 Rate Limit Hit! Cooling down 60s...", prefix)
 						time.Sleep(60 * time.Second)
 					}
-
 					status.Update(inst.Name, err)
 				} else {
 					status.Update(inst.Name, nil)
@@ -266,7 +273,6 @@ func worker(inst config.Instance) {
 
 		} else {
 			// --- RAW MODE (GPS/Single) ---
-			// Inject meta
 			data["time"] = time.Now().UTC().Format(time.RFC3339Nano)
 			data["ship_id"] = inst.Name
 
@@ -279,6 +285,8 @@ func worker(inst config.Instance) {
 		}
 	}
 }
+
+// --- HELPER FUNCTIONS ---
 
 func setupLogging() {
 	f, err := os.OpenFile("lighthouse.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -322,5 +330,26 @@ func showLogsFor(n string) {
 		if strings.Contains(l, t) {
 			fmt.Println(l)
 		}
+	}
+}
+
+// reloadService attempts to restart the background service to apply config changes.
+func reloadService() {
+	fmt.Println("⚙️  Applying changes...")
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-Command", "Restart-Service", "HarborLighthouse")
+	} else {
+		// Linux/Mac
+		cmd = exec.Command("sudo", "systemctl", "restart", "HarborLighthouse")
+	}
+
+	if err := cmd.Run(); err != nil {
+		// It's possible the service isn't installed yet, or user lacks sudo.
+		// We don't fail hard here, just warn.
+		fmt.Println("⚠️  Could not auto-restart service. If this is a new install, run: sudo lighthouse --install")
+	} else {
+		fmt.Println("♻️  Service restarted successfully!")
 	}
 }

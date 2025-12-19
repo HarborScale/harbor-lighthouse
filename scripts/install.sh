@@ -50,4 +50,10 @@ curl -L -o lighthouse "$URL"
 chmod +x lighthouse
 sudo mv lighthouse /usr/local/bin/lighthouse
 
-echo "✅ Installed! Run: lighthouse --add --name 'test' --harbor-id '123'"
+# --- ⚡ INSTALL SERVICE NOW ---
+# We always try to install/update the service here.
+echo "⚙️  Registering System Service..."
+sudo lighthouse --install
+
+echo "✅ Installed & Running (Idle)"
+echo "👉 Now configure it: lighthouse --add --name 'server-1' --harbor-id '123'"
