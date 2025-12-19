@@ -1,138 +1,217 @@
+
 # 🚢 Harbor Lighthouse
 
 **The Universal Telemetry Agent for [Harbor Scale](https://harborscale.com)**
 
-Lighthouse is a single-binary, cross-platform agent designed to collect metrics from anywhere (Linux servers, Windows desktops, Meshtastic nodes, Python scripts) and ship them securely to Harbor Scale.
+Lighthouse is a tiny, single-binary agent that runs on any computer (Linux, Mac, Windows, Raspberry Pi). It collects data, handles network issues, updates itself automatically, and ships your metrics securely to the Harbor Scale cloud.
 
-It features a hybrid engine that supports both high-volume "Cargo" metrics (CPU/RAM batching) and raw object streams (GPS/LoRaWAN), all while handling rate limits, auto-updates, and service management automatically.
+
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Installation
 
-### Linux / macOS / Raspberry Pi
-
+### 🐧 Linux / 🍎 macOS / 🥧 Raspberry Pi
+Copy and paste this into your terminal:
 ```bash
-# Install & Start Service
 curl -sL [https://downloads.harborscale.com/install.sh](https://downloads.harborscale.com/install.sh) | sudo bash
 
-# Add a Monitor (e.g., Linux System Stats)
+```
+
+### 🪟 Windows
+
+1. Download the latest `.exe` from the [suspicious link removed].
+2. Open PowerShell as Administrator.
+3. Run: `.\lighthouse.exe --install`
+
+---
+
+## 🎮 How to Use
+
+Everything is done using the `./lighthouse` command.
+
+### 1. Add a Monitor
+
+To start monitoring a device, you "add" an instance.
+
+**Example: Monitor this Linux Server**
+
+```bash
 lighthouse --add \
   --name "server-01" \
   --harbor-id "786" \
-  --key "hs_live_xxxxxxxx" \
+  --key "hs_live_key_xxx" \
   --source linux
 
 ```
 
-### Windows (PowerShell)
+### 2. Run a Custom Script
 
-```powershell
-# Download .exe from Releases, then run:
-.\lighthouse.exe --install
+Turn any script into a telemetry stream.
 
-# Add a Monitor
-.\lighthouse.exe --add --name "office-pc" --harbor-id "786" --key "hs_live_xxxx" --source windows
+```bash
+lighthouse --add \
+  --name "weather-script" \
+  --harbor-id "786" \
+  --key "hs_live_key_xxx" \
+  --source exec \
+  --param command="python3 /opt/weather.py"
+
+```
+
+### 3. Manage the Agent
+
+| Command | Description |
+| --- | --- |
+| `sudo ./lighthouse --install` | **Start here.** Installs Lighthouse as a background service (Systemd/Launchd). |
+| `./lighthouse --list` | Shows the health status of all running monitors. |
+| `./lighthouse --logs "name"` | Shows the debug logs for a specific monitor. |
+| `./lighthouse --remove "name"` | Stops and deletes a monitor configuration. |
+| `./lighthouse --autoupdate=false` | Disables the automatic 24h update check. |
+
+---
+
+## ⚙️ Configuration Flags (Reference)
+
+When running `lighthouse --add`, you can use these flags to customize behavior:
+
+| Flag | Required? | Description | Default |
+| --- | --- | --- | --- |
+| `--name` | ✅ Yes | A unique ID for this device (e.g., `server-01`). | - |
+| `--harbor-id` | ✅ Yes | Your Harbor ID from the dashboard. | - |
+| `--key` | ❌ No | Your API Key (if required by your Harbor). | - |
+| `--source` | ✅ Yes | Which collector to use (`linux`, `windows`, `exec`). | `linux` |
+| `--interval` | ❌ No | How often to collect data (in seconds). | `60` |
+| `--batch-size` | ❌ No | Max number of metrics to send in one HTTP request. | `100` |
+| `--param` | ❌ No | Pass specific settings to a collector. | - |
+
+---
+
+## 🔌 Collectors
+
+Lighthouse comes with built-in drivers called "Collectors". Choose one using `--source`.
+
+### 1. System Monitors (`linux`, `windows`, `macos`)
+
+Automatically collects CPU, RAM, Disk Usage, Uptime, and Load Averages.
+
+* **Parameters:** None.
+* **Usage:** `--source linux`
+
+### 2. Custom Scripts (`exec`)
+
+Runs **any** shell command or script you write. The script must output **JSON**.
+
+* **Parameters:**
+* `command` (Required): The full command string to run.
+
+
+* **Usage:** `--source exec --param command="bash /home/user/script.sh"`
+
+---
+
+## 🛠️ Deep Dive: Custom Scripts (`exec`)
+
+The `exec` collector allows you to integrate **any** data source (Python, Node, Bash, Go) without importing SDKs.
+
+### How it works
+
+1. Your script prints a JSON object to `STDOUT`.
+2. Lighthouse captures it.
+3. Lighthouse automatically tags it with your `ship_id` and the precise `timestamp`.
+4. Lighthouse "explodes" the JSON keys into separate metrics and batches them to the cloud.
+
+### ⚡ Handling Multiple Metrics
+
+If your script collects multiple data points at once (e.g., temperature AND humidity), simply include them all as keys in **one single JSON object**.
+
+**✅ Correct Output:**
+
+```json
+{
+  "temperature": 24.5,
+  "humidity": 60,
+  "voltage": 5.2
+}
+
+```
+
+*Lighthouse will split this into 3 separate metrics automatically.*
+
+**❌ Incorrect Output (Do NOT use Arrays):**
+
+```json
+[
+  {"temperature": 24.5},
+  {"humidity": 60}
+]
+
+```
+
+### Example: Multi-Metric Python Script
+
+Save this as `sensors.py`:
+
+```python
+import json
+import random
+
+# Collect your data...
+cpu_temp = 45.2
+fan_speed = 1200
+errors = 0
+
+# Print ONE object with all data
+print(json.dumps({
+    "cpu_temp_c": cpu_temp,
+    "fan_rpm": fan_speed,
+    "error_count": errors
+}))
+
+```
+
+**Run it:**
+
+```bash
+./lighthouse --add \
+  --name "system-sensors" \
+  --harbor-id "786" \
+  --source exec \
+  --param command="python3 sensors.py"
 
 ```
 
 ---
 
-## 🛠 Power User Guide
+## 🧑‍💻 Contributing: How to Add New Collectors
 
-### 1. The Architecture
+Want to add a new integration (e.g., `docker`, `mysql`)? It's easy!
 
-Lighthouse uses a **Fan-Out / Hybrid Architecture**:
-
-- **Collector:** Gathers data (e.g., reads 50 system metrics).
-- **Engine:** Checks the `Harbor Type`:
-- **`general` (Cargo Mode):** Explodes the 50 metrics into individual standardized payloads and sends them via the **Batch API** (`/batch`).
-- **`gps` (Raw Mode):** Injects metadata (Ship ID, Time) and sends the raw JSON object to the specialized endpoint (`/gps`).
-
-- **Transport:** Handles retries, HTTP 429 backoff, and 413 Payload size errors.
-
-### 2. Configuration (`lighthouse_config.json`)
-
-Located next to the binary. You can edit this manually if you prefer not to use the CLI.
-
-```json
-{
-  "auto_update": true,
-  "instances": [
-    {
-      "name": "production-db",
-      "harbor_id": "786",
-      "api_key": "hs_live_key",
-      "source": "linux",
-      "harbor_type": "general",
-      "interval": 60,
-      "max_batch_size": 100,
-      "params": {}
-    },
-    {
-      "name": "roof-node",
-      "harbor_id": "786",
-      "api_key": "hs_live_key",
-      "source": "meshtastic",
-      "harbor_type": "gps",
-      "interval": 300,
-      "max_batch_size": 1,
-      "params": {
-        "ip": "192.168.1.50"
-      }
-    }
-  ]
+1. **Create the File:**
+Create a new file in `internal/collectors/my_collector.go`.
+2. **Write the Logic:**
+Your function must match this signature:
+```go
+func MyCollector(params map[string]string) (map[string]interface{}, error) {
+    // 1. Read params (e.g. params["port"])
+    // 2. Collect data
+    // 3. Return map[string]interface{}{"metric_name": 123}
+    return data, nil
 }
-```
-
-### 3. CLI Commands Reference
-
-| Flag           | Description                           | Example                       |
-| -------------- | ------------------------------------- | ----------------------------- |
-| `--add`        | Registers a new monitoring task.      | `--add --name "x" ...`        |
-| `--remove`     | Stops and deletes a task by name.     | `--remove "x"`                |
-| `--list`       | Shows health status of all tasks.     | `--list`                      |
-| `--logs`       | filters logs for a specific task.     | `--logs "x"`                  |
-| `--install`    | Installs systemd/LaunchAgent/Service. | `sudo ./lighthouse --install` |
-| `--autoupdate` | Toggles self-updating mechanism.      | `--autoupdate=false`          |
-
-### 4. Advanced: Rate Limiting & Batching
-
-To optimize for specific Harbor Scale plans, you can tune the collection engine per instance:
-
-**High Frequency (Pro Plan):**
-
-```bash
-./lighthouse --add --name "high-freq" ... --interval 5 --batch-size 500
 
 ```
 
-- **Effect:** Collects every 5s. If data > 500 items, it splits into multiple HTTP requests automatically.
 
-**Low Bandwidth (IoT Plan):**
-
-```bash
-./lighthouse --add --name "iot-device" ... --interval 300 --batch-size 10
-
-```
-
-### 5. Debugging
-
-If a specific instance is failing, use the instance-scoped log filter:
-
-```bash
-# See why 'roof-node' is offline
-./lighthouse --logs "roof-node"
+3. **Register It:**
+Edit `internal/collectors/registry.go` and add your name to the switch statement:
+```go
+case "my_collector":
+    return MyCollector, nil
 
 ```
 
-_Output:_
 
-```text
-[roof-node] Starting meshtastic worker...
-[roof-node] ❌ Collection Failed: dial tcp 192.168.1.50:80: connect: connection refused
-
-```
+4. **Build:** Run `go build`. You can now use `--source my_collector`.
 
 ---
 
@@ -141,15 +220,14 @@ _Output:_
 **Prerequisites:** Go 1.21+
 
 1. **Clone the Repo:**
-
 ```bash
 git clone [https://github.com/harborscale/lighthouse.git](https://github.com/harborscale/lighthouse.git)
 cd lighthouse
 
 ```
 
-2. **Build:**
 
+2. **Build:**
 ```bash
 # Linux / Mac
 go build -o lighthouse cmd/lighthouse/main.go
@@ -159,113 +237,11 @@ GOOS=windows GOARCH=amd64 go build -o lighthouse.exe cmd/lighthouse/main.go
 
 ```
 
-3. **Cross-Compile (for Pi/Release):**
 
-```bash
-# Raspberry Pi (64-bit)
-GOOS=linux GOARCH=arm64 go build -o lighthouse-pi cmd/lighthouse/main.go
-
-```
-
----
-
-## 🤖 Integration Drivers
-
-Lighthouse currently supports the following drivers natively:
-
-- **`linux` / `system**`: Uses `gopsutil` to fetch CPU, RAM, Disk, Uptime, and Load Avg.
-- **`windows`**: Same as linux, but optimized for Windows WMI.
-- **`meshtastic`**:
-- **HTTP Mode:** If `ip` param is provided (`--param ip=1.2.3.4`), connects to device Wi-Fi JSON API.
-- **Serial Mode:** If no IP, attempts to use Python CLI wrapper via USB.
-
----
-
-### 🔌 Running Custom Scripts (The "Universal Adapter")
-
-Lighthouse can turn **any** script into a telemetry stream. You don't need to import SDKs or manage HTTP requests in your script.
-
-**How it works:**
-
-1. Your script prints a JSON object to `STDOUT`.
-2. Lighthouse captures it.
-3. Lighthouse automatically tags it with your `ship_id` and the precise `timestamp`.
-4. Lighthouse batches and transmits it to the cloud.
-
-#### 1. The Requirement
-
-Your script (Bash, Python, Node, Go, etc.) must output **valid JSON**.
-
-**Example (`weather.py`):**
-
-```python
-import json
-# Do your logic...
-print(json.dumps({
-    "temp_c": 24.5,
-    "humidity": 60,
-    "status": 1
-}))
-
-```
-
-#### 2. The Command
-
-Register the script using the `exec` source and pass the command string:
-
-```bash
-./lighthouse --add \
-  --name "garden-pi" \
-  --harbor-id "786" \
-  --key "hs_live_key" \
-  --source exec \
-  --param command="python3 /home/user/scripts/weather.py"
-
-```
-
-#### 3. The Result
-
-Lighthouse executes your command every interval (default 60s). It enriches the data before sending:
-
-- **What your script output:** `{"temp_c": 24.5}`
-- **What Harbor Scale receives:**
-
-```json
-{
-  "ship_id": "garden-pi",
-  "time": "2023-10-27T10:00:00.000Z",
-  "cargo_id": "temp_c",
-  "value": 24.5
-}
-```
-
-#### 💡 Pro Tip: Bash One-Liners
-
-You can even run simple inline shell commands without a file:
-
-```bash
-# Monitor the number of active SSH connections
-./lighthouse --add \
-  --name "ssh-monitor" \
-  --harbor-id "786" \
-  --source exec \
-  --param command='echo "{\"active_ssh\": $(who | wc -l)}"'
-
-```
-
----
-
-## 🔄 Auto-Update Mechanism
-
-Lighthouse checks GitHub Releases every 24 hours.
-
-- If a new version (tag `v*`) is found, it downloads the binary for the current OS/Arch.
-- It verifies the checksum.
-- It replaces the running executable and restarts the service.
-- **Disable this:** `./lighthouse --autoupdate=false`
 
 ---
 
 ## 📄 License
 
 MIT License. Built with ❤️ for the Harbor Scale Community.
+
