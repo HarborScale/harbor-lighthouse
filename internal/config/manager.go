@@ -9,12 +9,14 @@ import (
 const ConfigFileName = "lighthouse_config.json"
 
 type Instance struct {
-	Name       string            `json:"name"`        // ship_id
-	HarborID   string            `json:"harbor_id"`   // e.g. "786"
-	APIKey     string            `json:"api_key"`     // X-API-Key header
-	Source     string            `json:"source"`      // linux, meshtastic
-	HarborType string            `json:"harbor_type"` // general, gps
-	Params     map[string]string `json:"params"`      // Extra config
+	Name         string            `json:"name"`
+	HarborID     string            `json:"harbor_id"`
+	APIKey       string            `json:"api_key"`
+	Source       string            `json:"source"`
+	HarborType   string            `json:"harbor_type"`
+	Params       map[string]string `json:"params"`
+	Interval     int               `json:"interval"`       // Seconds between runs
+	MaxBatchSize int               `json:"max_batch_size"` // Max items per POST
 }
 
 type Config struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"io"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	_ "embed"
 
 	"github.com/harborscale/lighthouse/internal/collectors"
 	"github.com/harborscale/lighthouse/internal/config"
@@ -28,10 +28,13 @@ var Version = "dev"
 
 // --- Helper for Map Flags ---
 type paramFlags map[string]string
+
 func (i *paramFlags) String() string { return "params" }
 func (i *paramFlags) Set(value string) error {
 	p := strings.SplitN(value, "=", 2)
-	if len(p) == 2 { (*i)[p[0]] = p[1] }
+	if len(p) == 2 {
+		(*i)[p[0]] = p[1]
+	}
 	return nil
 }
 
@@ -55,7 +58,11 @@ func main() {
 	src := flag.String("source", "linux", "Source (linux, meshtastic)")
 	typ := flag.String("type", "general", "Harbor Type (general, gps)")
 
-	var params = make(paramFlags)
+	// Rate Limiting Flags
+	interval := flag.Int("interval", 60, "Collection interval in seconds")
+	batchSize := flag.Int("batch-size", 100, "Max items per HTTP request")
+
+	params := make(paramFlags)
 	flag.Var(&params, "param", "Key=Value params")
 
 	flag.Parse()
@@ -82,12 +89,18 @@ func main() {
 
 	// 3. Service Control
 	svc, err := service.Setup(runDaemon)
-	if err != nil { log.Fatal("Service Setup Error:", err) }
+	if err != nil {
+		log.Fatal("Service Setup Error:", err)
+	}
 
 	if *install {
 		fmt.Println("Installing Service...")
-		if err := svc.Install(); err != nil { log.Fatal("❌ Install Failed:", err) }
-		if err := svc.Start(); err != nil { log.Fatal("❌ Start Failed:", err) }
+		if err := svc.Install(); err != nil {
+			log.Fatal("❌ Install Failed:", err)
+		}
+		if err := svc.Start(); err != nil {
+			log.Fatal("❌ Start Failed:", err)
+		}
 		fmt.Println("✅ Service Installed & Started!")
 		return
 	}
@@ -99,17 +112,29 @@ func main() {
 	}
 
 	// 4. CLI Commands (List/Logs/Add/Remove)
-	if *list { showStatus(); return }
-	if *logs != "" { showLogsFor(*logs); return }
+	if *list {
+		showStatus()
+		return
+	}
+	if *logs != "" {
+		showLogsFor(*logs)
+		return
+	}
 
 	if *add {
-		if *name == "" || *harborID == "" { log.Fatal("❌ Error: --name and --harbor-id are required") }
+		if *name == "" || *harborID == "" {
+			log.Fatal("❌ Error: --name and --harbor-id are required")
+		}
 		cfg, _ := config.Load()
 		instance := config.Instance{
 			Name: *name, HarborID: *harborID, APIKey: *key,
 			Source: *src, HarborType: *typ, Params: params,
+			Interval:     *interval,
+			MaxBatchSize: *batchSize,
 		}
-		if err := cfg.Add(instance); err != nil { log.Fatal("❌", err) }
+		if err := cfg.Add(instance); err != nil {
+			log.Fatal("❌", err)
+		}
 		config.Save(cfg)
 		fmt.Println("✅ Added instance. Restart service to apply.")
 		return
@@ -159,6 +184,10 @@ func runDaemon() {
 func worker(inst config.Instance) {
 	prefix := fmt.Sprintf("[%s]", inst.Name)
 
+	// Default Fallbacks
+	if inst.Interval < 1 { inst.Interval = 60 }
+	if inst.MaxBatchSize < 1 { inst.MaxBatchSize = 100 }
+
 	// 1. Get Mode & URL
 	def, err := engine.Get(inst.HarborType)
 	if err != nil {
@@ -179,55 +208,83 @@ func worker(inst config.Instance) {
 
 	log.Printf("%s Started (%s mode) -> %s", prefix, def.Mode, url)
 
+	// DYNAMIC TICKER
+	ticker := time.NewTicker(time.Duration(inst.Interval) * time.Second)
+
 	// 3. Loop
 	for {
+		// Wait for tick
+		<-ticker.C
+
 		data, err := col(inst.Params)
 		if err != nil {
-			log.Printf("%s ⚠️ Collection Failed: %v", prefix, err)
+			log.Printf("%s ❌ Collection Failed: %v", prefix, err)
 			status.Update(inst.Name, err)
-		} else {
-			// Success Gathering
+			continue
+		}
 
-			if def.Mode == "cargo" {
-				// --- CARGO MODE (Fan-Out) ---
-				errCount := 0
-				for k, v := range data {
-					payload := transport.CargoPayload{
-						Time: time.Now().UTC().Format(time.RFC3339Nano),
-						ShipID: inst.Name,
-						CargoID: k,
-						Value: v,
+		if def.Mode == "cargo" {
+			// --- CARGO MODE (BATCHED) ---
+
+			// 1. Flatten Data into a List
+			var fullList []transport.CargoPayload
+
+			for k, v := range data {
+				fullList = append(fullList, transport.CargoPayload{
+					Time:    time.Now().UTC().Format(time.RFC3339Nano),
+					ShipID:  inst.Name,
+					CargoID: k,
+					Value:   v,
+				})
+			}
+
+			// 2. CHUNK IT (Respect MaxBatchSize)
+			totalItems := len(fullList)
+			for i := 0; i < totalItems; i += inst.MaxBatchSize {
+				end := i + inst.MaxBatchSize
+				if end > totalItems { end = totalItems }
+
+				batchChunk := fullList[i:end]
+
+				// 3. Send Batch
+				err := transport.SendBatch(url+"/batch", inst.APIKey, batchChunk)
+
+				if err != nil {
+					log.Printf("%s ⚠️ Batch Send Error: %v", prefix, err)
+
+					// Smart Cool-down for 429
+					if strings.Contains(err.Error(), "429") {
+						log.Printf("%s 🛑 Rate Limit Hit! Cooling down 60s...", prefix)
+						time.Sleep(60 * time.Second)
 					}
-					if err := transport.Send(url, inst.APIKey, payload); err != nil {
-						log.Printf("%s ⚠️ Send Fail (%s): %v", prefix, k, err)
-						errCount++
-					}
-				}
-				if errCount == 0 { status.Update(inst.Name, nil) }
 
-			} else {
-				// --- RAW MODE (Batch/GPS) ---
-				// Inject meta
-				data["time"] = time.Now().UTC().Format(time.RFC3339Nano)
-				data["ship_id"] = inst.Name
-
-				if err := transport.Send(url, inst.APIKey, data); err != nil {
-					log.Printf("%s ⚠️ Send Fail: %v", prefix, err)
 					status.Update(inst.Name, err)
 				} else {
 					status.Update(inst.Name, nil)
 				}
 			}
-		}
 
-		// Wait 60s (could be configurable via params)
-		time.Sleep(60 * time.Second)
+		} else {
+			// --- RAW MODE (GPS/Single) ---
+			// Inject meta
+			data["time"] = time.Now().UTC().Format(time.RFC3339Nano)
+			data["ship_id"] = inst.Name
+
+			if err := transport.Send(url, inst.APIKey, data); err != nil {
+				log.Printf("%s ⚠️ Send Fail: %v", prefix, err)
+				status.Update(inst.Name, err)
+			} else {
+				status.Update(inst.Name, nil)
+			}
+		}
 	}
 }
 
 func setupLogging() {
 	f, err := os.OpenFile("lighthouse.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	log.SetOutput(io.MultiWriter(os.Stdout, f))
 }
 
@@ -235,7 +292,9 @@ func showStatus() {
 	cfg, _ := config.Load()
 	st := status.Load()
 	fmt.Printf("📋 Harbor Lighthouse %s\n", Version)
-	if len(cfg.Instances) == 0 { fmt.Println("   (No instances)") }
+	if len(cfg.Instances) == 0 {
+		fmt.Println("   (No instances)")
+	}
 
 	for _, i := range cfg.Instances {
 		s := st[i.Name]
@@ -260,6 +319,8 @@ func showLogsFor(n string) {
 	lines := strings.Split(string(d), "\n")
 	t := fmt.Sprintf("[%s]", n)
 	for _, l := range lines {
-		if strings.Contains(l, t) { fmt.Println(l) }
+		if strings.Contains(l, t) {
+			fmt.Println(l)
+		}
 	}
 }
