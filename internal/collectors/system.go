@@ -10,97 +10,78 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-func SystemCollector(params map[string]string) (map[string]interface{}, error) {
-	data := make(map[string]interface{})
+func SystemCollector(params map[string]string) ([]map[string]interface{}, error) {
+	snapshot := make(map[string]interface{})
 
-	// --------------------
-	// CPU
-	// --------------------
+	// --- CPU ---
 	if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
-		data["cpu_percent"] = c[0]
+		snapshot["cpu_percent"] = c[0]
 	}
-
 	if cores, err := cpu.Counts(true); err == nil {
-		data["cpu_cores"] = cores
+		snapshot["cpu_cores"] = cores
 	}
-
 	if times, err := cpu.Times(false); err == nil && len(times) > 0 {
 		t := times[0]
-		data["cpu_user"] = t.User
-		data["cpu_system"] = t.System
-		data["cpu_idle"] = t.Idle
-		data["cpu_iowait"] = t.Iowait
+		snapshot["cpu_user"] = t.User
+		snapshot["cpu_system"] = t.System
+		snapshot["cpu_idle"] = t.Idle
+		snapshot["cpu_iowait"] = t.Iowait
 	}
 
-	// Load average (very important for servers)
+	// --- Load Avg ---
 	if l, err := load.Avg(); err == nil {
-		data["load_1"] = l.Load1
-		data["load_5"] = l.Load5
-		data["load_15"] = l.Load15
+		snapshot["load_1"] = l.Load1
+		snapshot["load_5"] = l.Load5
+		snapshot["load_15"] = l.Load15
 	}
 
-	// --------------------
-	// Memory
-	// --------------------
+	// --- RAM ---
 	if v, err := mem.VirtualMemory(); err == nil {
-		data["ram_used_percent"] = v.UsedPercent
-		data["ram_total_mb"] = v.Total / 1024 / 1024
-		data["ram_used_mb"] = v.Used / 1024 / 1024
-		data["ram_free_mb"] = v.Free / 1024 / 1024
-		data["ram_available_mb"] = v.Available / 1024 / 1024
+		snapshot["ram_used_percent"] = v.UsedPercent
+		snapshot["ram_total_mb"] = v.Total / 1024 / 1024
+		snapshot["ram_used_mb"] = v.Used / 1024 / 1024
+		snapshot["ram_free_mb"] = v.Free / 1024 / 1024
 	}
 
+	// --- Swap ---
 	if s, err := mem.SwapMemory(); err == nil {
-		data["swap_used_percent"] = s.UsedPercent
-		data["swap_used_mb"] = s.Used / 1024 / 1024
+		snapshot["swap_used_percent"] = s.UsedPercent
+		snapshot["swap_used_mb"] = s.Used / 1024 / 1024
 	}
 
-	// --------------------
-	// Disk (root usage)
-	// --------------------
+	// --- Disk (Root) ---
 	if d, err := disk.Usage("/"); err == nil {
-		data["disk_used_percent"] = d.UsedPercent
-		data["disk_free_gb"] = d.Free / 1024 / 1024 / 1024
-		data["disk_total_gb"] = d.Total / 1024 / 1024 / 1024
+		snapshot["disk_used_percent"] = d.UsedPercent
+		snapshot["disk_free_gb"] = d.Free / 1024 / 1024 / 1024
+		snapshot["disk_total_gb"] = d.Total / 1024 / 1024 / 1024
 	}
 
-	// Disk IO (aggregated, numeric only)
+	// --- Disk IO ---
 	if io, err := disk.IOCounters(); err == nil {
-		var readBytes, writeBytes, readCount, writeCount uint64
+		var readBytes, writeBytes uint64
 		for _, stat := range io {
 			readBytes += stat.ReadBytes
 			writeBytes += stat.WriteBytes
-			readCount += stat.ReadCount
-			writeCount += stat.WriteCount
 		}
-		data["disk_read_bytes"] = readBytes
-		data["disk_write_bytes"] = writeBytes
-		data["disk_read_count"] = readCount
-		data["disk_write_count"] = writeCount
+		snapshot["disk_read_bytes"] = readBytes
+		snapshot["disk_write_bytes"] = writeBytes
 	}
 
-	// --------------------
-	// Network (aggregated)
-	// --------------------
+	// --- Net ---
 	if n, err := net.IOCounters(false); err == nil && len(n) > 0 {
-		data["net_bytes_sent"] = n[0].BytesSent
-		data["net_bytes_recv"] = n[0].BytesRecv
-		data["net_packets_sent"] = n[0].PacketsSent
-		data["net_packets_recv"] = n[0].PacketsRecv
+		snapshot["net_bytes_sent"] = n[0].BytesSent
+		snapshot["net_bytes_recv"] = n[0].BytesRecv
 	}
 
-	// --------------------
-	// Host / OS
-	// --------------------
+	// --- Host ---
 	if h, err := host.Info(); err == nil {
-		data["uptime_seconds"] = h.Uptime
-		data["processes"] = h.Procs
+		snapshot["uptime_seconds"] = h.Uptime
+		snapshot["processes"] = h.Procs
 	}
-
-	// Process count (fallback / more accurate on some systems)
 	if pids, err := process.Pids(); err == nil {
-		data["process_count"] = len(pids)
+		snapshot["process_count"] = len(pids)
 	}
 
-	return data, nil
+	// ✅ CORRECT RETURN: Wrap the single snapshot in a slice
+	return []map[string]interface{}{snapshot}, nil
 }

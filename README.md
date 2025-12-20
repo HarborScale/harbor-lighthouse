@@ -1,6 +1,8 @@
+
+
 # 🚢 Harbor Lighthouse
 
-**The Universal Telemetry Agent for [Harbor Scale](https://harborscale.com)**
+**The Universal Telemetry Agent for [Harbor Scale**](https://harborscale.com)
 
 Lighthouse is a tiny, single-binary agent that runs on any computer (Linux, Mac, Windows, Raspberry Pi). It collects data, handles network issues, updates itself automatically, and ships your metrics securely to the Harbor Scale cloud or your own [Self-Hosted OSS](https://github.com/harborscale/telemetry-harbor-oss) instance.
 
@@ -11,7 +13,9 @@ Lighthouse is a tiny, single-binary agent that runs on any computer (Linux, Mac,
 We provide a universal installer that automatically detects your OS and architecture.
 
 ### 🐧 Linux / 🍎 macOS / 🥧 Raspberry Pi
+
 Copy and paste this into your terminal:
+
 ```bash
 curl -sL get.harborscale.com | sudo bash
 
@@ -60,7 +64,7 @@ lighthouse --add \
 
 ```
 
-> **Note:** When using `--endpoint`, the `--harbor-id` flag is optional (as OSS is single-tenant).
+> **Note:** When using `--endpoint`, the `--harbor-id` flag is optional.
 
 ### 3. Run a Custom Script
 
@@ -99,10 +103,10 @@ When running `lighthouse --add`, you can use these flags to customize behavior:
 | `--harbor-id` | ☁️ Cloud | Your Harbor ID (Required for Cloud). | - |
 | `--endpoint` | 🏠 OSS | Custom API URL (Required for Self-Hosted). | `https://harborscale.com` |
 | `--key` | ❌ No | Your API Key. | - |
-| `--source` | ✅ Yes | Which collector to use (`linux`, `windows`, `exec`). | `linux` |
+| `--source` | ✅ Yes | Which collector to use (`linux`, `exec`, `uptime`, `docker`, `meshtastic`). | `linux` |
 | `--interval` | ❌ No | How often to collect data (in seconds). | `60` |
 | `--batch-size` | ❌ No | Max number of metrics to send in one HTTP request. | `100` |
-| `--param` | ❌ No | Pass specific settings to a collector. | - |
+| `--param` | ❌ No | Pass specific settings to a collector (e.g., `--param target_url=...`). | - |
 
 ---
 
@@ -118,43 +122,72 @@ Automatically collects CPU, RAM, Disk Usage, Uptime, and Load Averages.
 
 ### 2. Custom Scripts (`exec`)
 
-Runs **any** shell command or script you write. The script must output **JSON**.
+Runs **any** shell command or script (Python, Bash, Node, etc.).
 
 * **Usage:** `--source exec --param command="bash /home/user/script.sh"`
+* **Optional Params:**
+* `timeout_ms`: Timeout in milliseconds (default: `10000`).
+
+### 3. HTTP Uptime (`uptime`)
+
+Monitors website availability and response times.
+
+* **Usage:** `--source uptime --param target_url="https://google.com"`
+* **Optional Params:**
+* `timeout_ms`: Connection timeout in milliseconds (default: `10000`).
+
+
+* **Metrics:** `http_up` (0/1), `http_latency_ms`, `http_status_code`.
+
+### 4. Docker Engine (`docker`)
+
+Monitors the local Docker daemon.
+
+* **Usage:** `--source docker`
+* **Requirement:** Must have access to `/var/run/docker.sock`.
+* **Metrics per Container:** `docker_state` (running/paused), `docker_uptime_secs`, `docker_image`.
 
 ---
 
 ## 🛠️ Deep Dive: Custom Scripts (`exec`)
 
-The `exec` collector allows you to integrate **any** data source (Python, Node, Bash, Go) without importing SDKs.
+The `exec` collector allows you to integrate **any** data source. Lighthouse runs your command, captures STDOUT, and parses the JSON.
 
-### How it works
+### Mode A: Single Ship (Simple)
 
-1. Your script prints a JSON object to `STDOUT`.
-2. Lighthouse captures it.
-3. Lighthouse automatically tags it with your `ship_id` and timestamp.
-4. Lighthouse "explodes" the JSON keys into separate metrics and batches them.
+Your script prints a single JSON object. Lighthouse assigns the `--name` you configured as the ID.
 
-**✅ Correct Output:**
+**Output:**
 
 ```json
 {
   "temperature": 24.5,
-  "humidity": 60,
-  "voltage": 5.2
+  "humidity": 60
 }
 
 ```
 
-**❌ Incorrect Output (Do NOT use Arrays):**
+### Mode B: Many Ships (Advanced)
+
+Your script acts as a gateway for multiple devices. It prints a JSON **Array** `[...]`. Lighthouse loops through the array and sends data for multiple ships at once.
+
+**Output:**
 
 ```json
 [
-  {"temperature": 24.5},
-  {"humidity": 60}
+  {
+    "ship_id": "sensor_living_room",
+    "temperature": 22.0
+  },
+  {
+    "ship_id": "sensor_kitchen",
+    "temperature": 25.5
+  }
 ]
 
 ```
+
+> **Note:** If you provide `ship_id` in the JSON, it overrides the `--name` flag for that specific data point.
 
 ---
 
@@ -163,14 +196,15 @@ The `exec` collector allows you to integrate **any** data source (Python, Node, 
 **Prerequisites:** Go 1.21+
 
 1. **Clone the Repo:**
+
 ```bash
-git clone [https://github.com/harborscale/harbor-lighthouse.git](https://github.com/harborscale/harbor-lighthouse.git)
+git clone https://github.com/harborscale/harbor-lighthouse.git
 cd harbor-lighthouse
 
 ```
 
-
 2. **Build:**
+
 ```bash
 # Linux / Mac
 go build -o lighthouse cmd/lighthouse/main.go
@@ -179,8 +213,6 @@ go build -o lighthouse cmd/lighthouse/main.go
 GOOS=windows GOARCH=amd64 go build -o lighthouse.exe cmd/lighthouse/main.go
 
 ```
-
-
 
 ---
 

@@ -245,57 +245,93 @@ func worker(inst config.Instance) {
 	for {
 		<-ticker.C
 
-		data, err := col(inst.Params)
+		// Collect a SLICE of results (1 to N ships)
+		shipResults, err := col(inst.Params)
 		if err != nil {
 			log.Printf("%s ❌ Collection Failed: %v", prefix, err)
 			status.Update(inst.Name, err)
 			continue
 		}
 
-		if def.Mode == "cargo" {
-			// --- CARGO MODE (BATCHED) ---
-			var fullList []transport.CargoPayload
+		currentTime := time.Now().UTC().Format(time.RFC3339Nano)
 
-			for k, v := range data {
-				fullList = append(fullList, transport.CargoPayload{
-					Time:    time.Now().UTC().Format(time.RFC3339Nano),
-					ShipID:  inst.Name,
-					CargoID: k,
-					Value:   v,
-				})
+		if def.Mode == "cargo" {
+			// --- CARGO MODE (BATCHED FAN-OUT) ---
+			// We aggregate ALL metrics from ALL ships into one big list for efficiency.
+			var batchBuffer []transport.CargoPayload
+
+			for _, data := range shipResults {
+				// 1. Resolve Identity
+				// Default to instance name, but allow override from data
+				activeShipID := inst.Name
+				if sid, ok := data["ship_id"].(string); ok && sid != "" {
+					activeShipID = sid
+					// IMPORTANT: Remove ship_id from map so it's not sent as a metric value
+					delete(data, "ship_id")
+				}
+
+				// 2. Flatten Data
+				for k, v := range data {
+					batchBuffer = append(batchBuffer, transport.CargoPayload{
+						Time:    currentTime,
+						ShipID:  activeShipID,
+						CargoID: k,
+						Value:   v,
+					})
+				}
 			}
 
-			// Chunking logic
-			totalItems := len(fullList)
-			for i := 0; i < totalItems; i += inst.MaxBatchSize {
-				end := i + inst.MaxBatchSize
-				if end > totalItems { end = totalItems }
-
-				batchChunk := fullList[i:end]
-				err := transport.SendBatch(url+"/batch", inst.APIKey, batchChunk)
-
-				if err != nil {
-					log.Printf("%s ⚠️ Batch Send Error: %v", prefix, err)
-					if strings.Contains(err.Error(), "429") {
-						log.Printf("%s 🛑 Rate Limit Hit! Cooling down 60s...", prefix)
-						time.Sleep(60 * time.Second)
+			// 3. Send in Chunks (Network Efficiency)
+			totalItems := len(batchBuffer)
+			if totalItems > 0 {
+				for i := 0; i < totalItems; i += inst.MaxBatchSize {
+					end := i + inst.MaxBatchSize
+					if end > totalItems {
+						end = totalItems
 					}
-					status.Update(inst.Name, err)
-				} else {
-					status.Update(inst.Name, nil)
+
+					chunk := batchBuffer[i:end]
+					if err := transport.SendBatch(url+"/batch", inst.APIKey, chunk); err != nil {
+						log.Printf("%s ⚠️ Batch Send Error: %v", prefix, err)
+						if strings.Contains(err.Error(), "429") {
+							log.Printf("%s 🛑 Rate Limit Hit! Cooling down 60s...", prefix)
+							time.Sleep(60 * time.Second)
+						}
+						status.Update(inst.Name, err)
+					} else {
+						status.Update(inst.Name, nil)
+					}
 				}
 			}
 
 		} else {
-			// --- RAW MODE (GPS/Single) ---
-			data["time"] = time.Now().UTC().Format(time.RFC3339Nano)
-			data["ship_id"] = inst.Name
+			// --- RAW MODE (SEQUENTIAL FAN-OUT) ---
+			// In Raw/GPS mode, we usually send one JSON object per ship.
+			// We iterate and send immediately.
 
-			if err := transport.Send(url, inst.APIKey, data); err != nil {
-				log.Printf("%s ⚠️ Send Fail: %v", prefix, err)
-				status.Update(inst.Name, err)
-			} else {
-				status.Update(inst.Name, nil)
+			for _, data := range shipResults {
+				// 1. Resolve Identity
+				activeShipID := inst.Name
+				if sid, ok := data["ship_id"].(string); ok && sid != "" {
+					activeShipID = sid
+					// In Raw mode, we keep ship_id in the JSON body usually,
+					// but let's ensure it matches the one we want to enforce.
+					data["ship_id"] = sid
+				} else {
+					// Inject default if missing
+					data["ship_id"] = activeShipID
+				}
+
+				// 2. Inject Time
+				data["time"] = currentTime
+
+				// 3. Send Individual Request
+				if err := transport.Send(url, inst.APIKey, data); err != nil {
+					log.Printf("%s ⚠️ Send Fail (%s): %v", prefix, activeShipID, err)
+					status.Update(inst.Name, err)
+				} else {
+					status.Update(inst.Name, nil)
+				}
 			}
 		}
 	}
@@ -354,7 +390,6 @@ func showLogsFor(n string) {
 }
 
 // reloadService attempts to restart the background service to apply config changes.
-// reloadService attempts to restart the background service to apply config changes.
 func reloadService() {
 	fmt.Println("⚙️  Applying changes...")
 
@@ -373,7 +408,7 @@ func reloadService() {
 
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("⚠️  Could not auto-restart service: %v\n", err)
-		
+
 		if runtime.GOOS == "windows" {
 			fmt.Println("👉 NOTE: On Windows, you must run your terminal as Administrator to restart the service automatically.")
 			fmt.Println("👉 Manual Fix: Open PowerShell as Admin and run: Restart-Service HarborLighthouse")
