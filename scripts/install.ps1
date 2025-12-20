@@ -1,17 +1,17 @@
 param([switch]$Uninstall)
-$Version = "v0.1.1"
+$Version = "v0.1.2"
 $Repo = "harborscale/harbor-lighthouse"
 $InstallDir = "C:\Program Files\HarborLighthouse"
 $ExePath = "$InstallDir\lighthouse.exe"
 
 # --- 1. UNINSTALL LOGIC ---
 if ($Uninstall) {
-    if (Test-Path $ExePath) { 
+    if (Test-Path $ExePath) {
         # Attempt to stop/uninstall service first
-        Start-Process -FilePath $ExePath -ArgumentList "--uninstall" -Wait -NoNewWindow 
+        Start-Process -FilePath $ExePath -ArgumentList "--uninstall" -Wait -NoNewWindow
     }
-    if (Test-Path $InstallDir) { 
-        Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue 
+    if (Test-Path $InstallDir) {
+        Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     Write-Host "✅ Uninstalled." -ForegroundColor Green
     return
