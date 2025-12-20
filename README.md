@@ -109,8 +109,7 @@ When running `lighthouse --add`, you can use these flags to customize behavior:
 | `--param` | ❌ No | Pass specific settings to a collector (e.g., `--param target_url=...`). | - |
 
 ---
-
-## 🔌 Collectors
+## 🔌 Collectors & Examples
 
 Lighthouse comes with built-in drivers called "Collectors". Choose one using `--source`.
 
@@ -118,34 +117,97 @@ Lighthouse comes with built-in drivers called "Collectors". Choose one using `--
 
 Automatically collects CPU, RAM, Disk Usage, Uptime, and Load Averages.
 
-* **Usage:** `--source linux`
+**Example Command:**
 
-### 2. Custom Scripts (`exec`)
+```bash
+lighthouse --add \
+  --name "my-server" \
+  --harbor-id "123" \
+  --key "hs_live_key_xxx" \
+  --source linux
 
-Runs **any** shell command or script (Python, Bash, Node, etc.).
+```
 
-* **Usage:** `--source exec --param command="bash /home/user/script.sh"`
-* **Optional Params:**
-* `timeout_ms`: Timeout in milliseconds (default: `10000`).
+* **Note:** On Windows or Mac, simply swap `--source linux` for `--source windows` or `--source macos`.
+
+### 2. Docker Engine (`docker`)
+
+Monitors the local Docker daemon. Captures container state (running/exited), uptime, and resource usage per container.
+
+**Example Command:**
+
+```bash
+lighthouse --add \
+  --name "docker-host" \
+  --harbor-id "123" \
+  --key "hs_live_key_xxx" \
+  --source docker
+
+```
+
+* **Requirement:** The user running Lighthouse must have permission to access `/var/run/docker.sock` (usually the `docker` group).
 
 ### 3. HTTP Uptime (`uptime`)
 
-Monitors website availability and response times.
+Monitors website availability, response codes, and latency.
 
-* **Usage:** `--source uptime --param target_url="https://google.com"`
+**Example Command:**
+
+```bash
+lighthouse --add \
+  --name "website-monitor" \
+  --harbor-id "123" \
+  --key "hs_live_key_xxx" \
+  --source uptime \
+  --param target_url="https://google.com"
+
+```
+
+* **Optional Params:** `--param timeout_ms=5000` (Set connection timeout in milliseconds).
+
+### 4. Custom Scripts (`exec`)
+
+Runs **any** shell command or script (Python, Bash, Node, etc.). The script must output JSON to STDOUT.
+
+**Example Command:**
+
+```bash
+lighthouse --add \
+  --name "custom-script" \
+  --harbor-id "123" \
+  --key "hs_live_key_xxx" \
+  --source exec \
+  --param command="python3 /opt/sensor.py"
+
+```
+
+* **Optional Params:** `--param timeout_ms=10000` (Kill script if it hangs longer than this).
+
+### 5. Meshtastic LoRa (`exec` + `mesh_engine`)
+
+Ingests telemetry from a Meshtastic USB device. It acts as a gateway, reporting battery, environmental metrics, and signal stats for every node in your mesh.
+
+**Step A: Install the Engine**
+
+* **Linux / Mac / Pi:** `curl -sL get.harborscale.com/meshtastic | sudo bash`
+* **Windows:** `iwr get.harborscale.com/meshtastic | iex`
+
+**Step B: Add the Monitor**
+
+```bash
+lighthouse --add \
+  --name "meshtastic-gateway" \
+  --harbor-id "123" \
+  --key "hs_live_key_xxx" \
+  --source exec \
+  --param command="mesh_engine --ttl 3600"
+
+```
+
 * **Optional Params:**
-* `timeout_ms`: Connection timeout in milliseconds (default: `10000`).
+* `--ttl <seconds>`: Ignore nodes not heard from in X seconds (Default: 3600).
+* `--port <port>`: Force specific USB serial port (e.g., `/dev/ttyUSB0` or `COM3`).
 
-
-* **Metrics:** `http_up` (0/1), `http_latency_ms`, `http_status_code`.
-
-### 4. Docker Engine (`docker`)
-
-Monitors the local Docker daemon.
-
-* **Usage:** `--source docker`
-* **Requirement:** Must have access to `/var/run/docker.sock`.
-* **Metrics per Container:** `docker_state` (running/paused), `docker_uptime_secs`, `docker_image`.
 
 ---
 
