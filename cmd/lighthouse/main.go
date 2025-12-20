@@ -354,21 +354,32 @@ func showLogsFor(n string) {
 }
 
 // reloadService attempts to restart the background service to apply config changes.
+// reloadService attempts to restart the background service to apply config changes.
 func reloadService() {
 	fmt.Println("⚙️  Applying changes...")
 
 	var cmd *exec.Cmd
+	var restartCmd string
+
 	if runtime.GOOS == "windows" {
+		// Windows: Requires Admin privileges to run this
 		cmd = exec.Command("powershell", "-Command", "Restart-Service", "HarborLighthouse")
+		restartCmd = "Restart-Service HarborLighthouse (Run as Admin)"
 	} else {
 		// Linux/Mac
 		cmd = exec.Command("sudo", "systemctl", "restart", "HarborLighthouse")
+		restartCmd = "sudo lighthouse --install"
 	}
 
 	if err := cmd.Run(); err != nil {
-		// It's possible the service isn't installed yet, or user lacks sudo.
-		// We don't fail hard here, just warn.
-		fmt.Println("⚠️  Could not auto-restart service. If this is a new install, run: sudo lighthouse --install")
+		fmt.Printf("⚠️  Could not auto-restart service: %v\n", err)
+		
+		if runtime.GOOS == "windows" {
+			fmt.Println("👉 NOTE: On Windows, you must run your terminal as Administrator to restart the service automatically.")
+			fmt.Println("👉 Manual Fix: Open PowerShell as Admin and run: Restart-Service HarborLighthouse")
+		} else {
+			fmt.Printf("👉 Manual Fix: Run '%s'\n", restartCmd)
+		}
 	} else {
 		fmt.Println("♻️  Service restarted successfully!")
 	}
