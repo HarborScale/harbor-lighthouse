@@ -1,8 +1,7 @@
 
-
 # 🚢 Harbor Lighthouse
 
-**The Universal Telemetry Agent for [Harbor Scale**](https://harborscale.com)
+**The Universal Telemetry Agent for [Harbor Scale](https://harborscale.com)**
 
 Lighthouse is a tiny, single-binary agent that runs on any computer (Linux, Mac, Windows, Raspberry Pi). It collects data, handles network issues, updates itself automatically, and ships your metrics securely to the Harbor Scale cloud or your own [Self-Hosted OSS](https://github.com/harborscale/telemetry-harbor-oss) instance.
 
