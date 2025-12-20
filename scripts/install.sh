@@ -1,31 +1,39 @@
 #!/bin/bash
+set -e
+
 VERSION="v0.1.2"
 REPO="harborscale/harbor-lighthouse"
+BINARY_NAME="lighthouse"
+INSTALL_PATH="/usr/local/bin/$BINARY_NAME"
 
 # --- 🗑️ UNINSTALL MODE ---
 if [ "$1" == "--uninstall" ]; then
     echo "🧹 Uninstalling Harbor Lighthouse..."
 
     # 1. Ask binary to remove the Service
-    if command -v lighthouse &> /dev/null; then
-        lighthouse --uninstall
+    if command -v $BINARY_NAME &> /dev/null; then
+        echo "   Stopping service..."
+        sudo $BINARY_NAME --uninstall || true
     fi
 
     # 2. Remove the binary file
-    if [ -f "/usr/local/bin/lighthouse" ]; then
-        sudo rm /usr/local/bin/lighthouse
-        echo "✅ Binary removed from /usr/local/bin"
+    if [ -f "$INSTALL_PATH" ]; then
+        sudo rm "$INSTALL_PATH"
+        echo "✅ Binary removed from $INSTALL_PATH"
     else
         echo "ℹ️  Binary not found (already removed?)"
     fi
 
+    # 3. Optional: Remove Config (User might want to keep data, but here is how to purge)
+    # sudo rm -rf /etc/harbor-lighthouse
+
     echo "✅ Uninstallation complete."
     exit 0
 fi
-# -------------------------
 
 # --- 🚢 INSTALL MODE ---
 echo "🚢 Installing Harbor Lighthouse $VERSION..."
+
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -43,17 +51,25 @@ case "$OS" in
     *) echo "❌ Unsupported OS: $OS"; exit 1 ;;
 esac
 
-URL="https://github.com/${REPO}/releases/download/${VERSION}/lighthouse-${BIN_OS}-${BIN_ARCH}"
+# Construct Download URL (Expects raw binary assets like 'lighthouse-linux-amd64')
+FILENAME="lighthouse-${BIN_OS}-${BIN_ARCH}"
+URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
 
-echo "⬇️  Downloading..."
-curl -L -o lighthouse "$URL"
-chmod +x lighthouse
-sudo mv lighthouse /usr/local/bin/lighthouse
+echo "⬇️  Downloading $FILENAME..."
+# Download to /tmp first to avoid partial writes to bin
+curl -L -o /tmp/lighthouse "$URL"
 
-# --- ⚡ INSTALL SERVICE NOW ---
-# We always try to install/update the service here.
+# Make executable
+chmod +x /tmp/lighthouse
+
+# Move to final destination (Requires Sudo)
+echo "📦 Installing to $INSTALL_PATH..."
+sudo mv /tmp/lighthouse "$INSTALL_PATH"
+
+# --- ⚡ INSTALL SERVICE ---
 echo "⚙️  Registering System Service..."
-sudo lighthouse --install
+# We run the install command as root
+sudo $BINARY_NAME --install
 
 echo "✅ Installed & Running (Idle)"
-echo "👉 Now configure it: lighthouse --add --name 'server-1' --harbor-id '123'"
+echo "👉 Now configure it: sudo lighthouse --add --name 'server-1' --harbor-id '123'"

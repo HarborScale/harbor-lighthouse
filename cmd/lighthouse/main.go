@@ -22,13 +22,17 @@ import (
 	"github.com/harborscale/harbor-lighthouse/internal/updater"
 )
 
+const (
+	BinaryName  = "lighthouse"
+	ServiceName = "harbor-lighthouse"
+	AppDisplay  = "Harbor Lighthouse"
+)
+
 //go:embed definitions.json
 var definitionsBytes []byte
 
-// Set by GitHub Actions build flags
 var Version = "dev"
 
-// --- Helper for Map Flags ---
 type paramFlags map[string]string
 
 func (i *paramFlags) String() string { return "params" }
@@ -41,6 +45,10 @@ func (i *paramFlags) Set(value string) error {
 }
 
 func main() {
+	// 1. INITIALIZE CONFIG
+	// This sets up config.GlobalDir and config.GlobalLogPath
+	config.Initialize()
+
 	// System Flags
 	install := flag.Bool("install", false, "Install as Service")
 	uninstall := flag.Bool("uninstall", false, "Uninstall Service")
@@ -60,12 +68,9 @@ func main() {
 	src := flag.String("source", "linux", "Source (linux, exec)")
 	typ := flag.String("type", "general", "Harbor Type (general, gps)")
 
-	// OSS / Custom Endpoint Flag
-	endpoint := flag.String("endpoint", "", "Custom API URL (e.g. http://localhost:8080)")
-
-	// Rate Limiting Flags
-	interval := flag.Int("interval", 60, "Collection interval in seconds")
-	batchSize := flag.Int("batch-size", 100, "Max items per HTTP request")
+	endpoint := flag.String("endpoint", "", "Custom API URL")
+	interval := flag.Int("interval", 60, "Collection interval")
+	batchSize := flag.Int("batch-size", 100, "Max items per request")
 
 	params := make(paramFlags)
 	flag.Var(&params, "param", "Key=Value params")
@@ -74,7 +79,7 @@ func main() {
 
 	// 0. Version
 	if *ver {
-		fmt.Printf("Harbor Lighthouse %s\n", Version)
+		fmt.Printf("%s v%s\n", AppDisplay, Version)
 		return
 	}
 
@@ -100,6 +105,10 @@ func main() {
 
 	if *install {
 		fmt.Println("Installing Service...")
+		fmt.Printf("   Binary: %s\n", os.Args[0])
+		// Use the centralized config variable
+		fmt.Printf("   Config: %s\n", config.GlobalDir)
+
 		if err := svc.Install(); err != nil {
 			log.Fatal("❌ Install Failed:", err)
 		}
@@ -116,7 +125,7 @@ func main() {
 		return
 	}
 
-	// 4. CLI Commands (List/Logs/Add/Remove)
+	// 4. CLI Commands
 	if *list {
 		showStatus()
 		return
@@ -127,12 +136,9 @@ func main() {
 	}
 
 	if *add {
-		// VALIDATION LOGIC
 		if *name == "" {
 			log.Fatal("❌ Error: --name is required")
 		}
-		// If using Cloud (no endpoint), HarborID is required.
-		// If using OSS (endpoint set), HarborID is optional.
 		if *endpoint == "" && *harborID == "" {
 			log.Fatal("❌ Error: --harbor-id is required for Cloud usage")
 		}
@@ -143,14 +149,14 @@ func main() {
 			Source: *src, HarborType: *typ, Params: params,
 			Interval:     *interval,
 			MaxBatchSize: *batchSize,
-			Endpoint:     *endpoint, // Save custom URL
+			Endpoint:     *endpoint,
 		}
 		if err := cfg.Add(instance); err != nil {
 			log.Fatal("❌", err)
 		}
 		config.Save(cfg)
 		fmt.Println("✅ Added instance.")
-		reloadService() // Auto Restart
+		reloadService()
 		return
 	}
 
@@ -159,14 +165,14 @@ func main() {
 		if cfg.Remove(*remove) {
 			config.Save(cfg)
 			fmt.Println("🗑️ Removed instance.")
-			reloadService() // Auto Restart
+			reloadService()
 		} else {
 			fmt.Println("❌ Instance not found.")
 		}
 		return
 	}
 
-	// 5. Run Daemon (Foreground or via Service)
+	// 5. Run Daemon
 	if err := svc.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -174,14 +180,16 @@ func main() {
 
 func runDaemon() {
 	setupLogging()
-	log.Printf("🚢 Harbor Lighthouse %s Starting...", Version)
+	log.Printf("🚢 %s %s Starting...", AppDisplay, Version)
+	// Use centralized config variable
+	log.Printf("📂 Config Dir: %s", config.GlobalDir)
 
 	cfg, _ := config.Load()
 
 	// Background Auto-Update
 	go updater.StartBackgroundChecker(Version, cfg.AutoUpdate)
 
-	// --- IDLE MODE (Prevents Service Crash) ---
+	// --- IDLE MODE ---
 	if len(cfg.Instances) == 0 {
 		log.Println("💤 No instances configured. Entering Idle Mode.")
 		for {
@@ -204,10 +212,13 @@ func runDaemon() {
 func worker(inst config.Instance) {
 	prefix := fmt.Sprintf("[%s]", inst.Name)
 
-	if inst.Interval < 1 { inst.Interval = 60 }
-	if inst.MaxBatchSize < 1 { inst.MaxBatchSize = 100 }
+	if inst.Interval < 1 {
+		inst.Interval = 60
+	}
+	if inst.MaxBatchSize < 1 {
+		inst.MaxBatchSize = 100
+	}
 
-	// 1. Get Mode & Suffix
 	def, err := engine.Get(inst.HarborType)
 	if err != nil {
 		log.Printf("%s ❌ Configuration Error: Unknown Type '%s'", prefix, inst.HarborType)
@@ -215,20 +226,14 @@ func worker(inst config.Instance) {
 		return
 	}
 
-	// --- 🔗 INTELLIGENT URL BUILDER ---
 	var url string
 	if inst.Endpoint != "" {
-		// OSS MODE: Use custom endpoint, NO Harbor ID in path
-		// Format: {Endpoint}/api/v2/ingest{Suffix}
 		cleanBase := strings.TrimRight(inst.Endpoint, "/")
 		url = fmt.Sprintf("%s/api/v2/ingest%s", cleanBase, def.EndpointSuffix)
 	} else {
-		// CLOUD MODE: Use standard URL, INCLUDE Harbor ID
-		// Format: https://harborscale.com/api/v2/ingest/{ID}{Suffix}
 		url = fmt.Sprintf("https://harborscale.com/api/v2/ingest/%s%s", inst.HarborID, def.EndpointSuffix)
 	}
 
-	// 2. Get Collector
 	col, err := collectors.Get(inst.Source)
 	if err != nil {
 		log.Printf("%s ❌ Collector Error: %v", prefix, err)
@@ -241,11 +246,9 @@ func worker(inst config.Instance) {
 	ticker := time.NewTicker(time.Duration(inst.Interval) * time.Second)
 	defer ticker.Stop()
 
-	// 3. Collection Loop
 	for {
 		<-ticker.C
 
-		// Collect a SLICE of results (1 to N ships)
 		shipResults, err := col(inst.Params)
 		if err != nil {
 			log.Printf("%s ❌ Collection Failed: %v", prefix, err)
@@ -256,21 +259,15 @@ func worker(inst config.Instance) {
 		currentTime := time.Now().UTC().Format(time.RFC3339Nano)
 
 		if def.Mode == "cargo" {
-			// --- CARGO MODE (BATCHED FAN-OUT) ---
-			// We aggregate ALL metrics from ALL ships into one big list for efficiency.
 			var batchBuffer []transport.CargoPayload
 
 			for _, data := range shipResults {
-				// 1. Resolve Identity
-				// Default to instance name, but allow override from data
 				activeShipID := inst.Name
 				if sid, ok := data["ship_id"].(string); ok && sid != "" {
 					activeShipID = sid
-					// IMPORTANT: Remove ship_id from map so it's not sent as a metric value
 					delete(data, "ship_id")
 				}
 
-				// 2. Flatten Data
 				for k, v := range data {
 					batchBuffer = append(batchBuffer, transport.CargoPayload{
 						Time:    currentTime,
@@ -281,7 +278,6 @@ func worker(inst config.Instance) {
 				}
 			}
 
-			// 3. Send in Chunks (Network Efficiency)
 			totalItems := len(batchBuffer)
 			if totalItems > 0 {
 				for i := 0; i < totalItems; i += inst.MaxBatchSize {
@@ -305,27 +301,17 @@ func worker(inst config.Instance) {
 			}
 
 		} else {
-			// --- RAW MODE (SEQUENTIAL FAN-OUT) ---
-			// In Raw/GPS mode, we usually send one JSON object per ship.
-			// We iterate and send immediately.
-
 			for _, data := range shipResults {
-				// 1. Resolve Identity
 				activeShipID := inst.Name
 				if sid, ok := data["ship_id"].(string); ok && sid != "" {
 					activeShipID = sid
-					// In Raw mode, we keep ship_id in the JSON body usually,
-					// but let's ensure it matches the one we want to enforce.
 					data["ship_id"] = sid
 				} else {
-					// Inject default if missing
 					data["ship_id"] = activeShipID
 				}
 
-				// 2. Inject Time
 				data["time"] = currentTime
 
-				// 3. Send Individual Request
 				if err := transport.Send(url, inst.APIKey, data); err != nil {
 					log.Printf("%s ⚠️ Send Fail (%s): %v", prefix, activeShipID, err)
 					status.Update(inst.Name, err)
@@ -337,11 +323,11 @@ func worker(inst config.Instance) {
 	}
 }
 
-// --- HELPER FUNCTIONS ---
-
 func setupLogging() {
-	f, err := os.OpenFile("lighthouse.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Use the centralized config variable
+	f, err := os.OpenFile(config.GlobalLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
+		fmt.Printf("⚠️ Could not open log file %s: %v\n", config.GlobalLogPath, err)
 		return
 	}
 	log.SetOutput(io.MultiWriter(os.Stdout, f))
@@ -350,7 +336,10 @@ func setupLogging() {
 func showStatus() {
 	cfg, _ := config.Load()
 	st := status.Load()
-	fmt.Printf("📋 Harbor Lighthouse %s\n", Version)
+	fmt.Printf("📋 %s %s\n", AppDisplay, Version)
+	// Use centralized config variable
+	fmt.Printf("📂 Config: %s\n", config.GlobalDir)
+
 	if len(cfg.Instances) == 0 {
 		fmt.Println("   (No instances)")
 	}
@@ -369,7 +358,6 @@ func showStatus() {
 				msg = fmt.Sprintf("Error: %s (%s ago)", s.LastError, ago)
 			}
 		}
-		// Clean display logic for missing HarborID in OSS mode
 		hID := i.HarborID
 		if hID == "" {
 			hID = "OSS"
@@ -379,17 +367,26 @@ func showStatus() {
 }
 
 func showLogsFor(n string) {
-	d, _ := os.ReadFile("lighthouse.log")
+	// Use centralized config variable
+	d, err := os.ReadFile(config.GlobalLogPath)
+	if err != nil {
+		fmt.Printf("❌ Could not read logs at %s: %v\n", config.GlobalLogPath, err)
+		return
+	}
 	lines := strings.Split(string(d), "\n")
 	t := fmt.Sprintf("[%s]", n)
+	found := false
 	for _, l := range lines {
 		if strings.Contains(l, t) {
 			fmt.Println(l)
+			found = true
 		}
+	}
+	if !found {
+		fmt.Println("No logs found for this instance in current log file.")
 	}
 }
 
-// reloadService attempts to restart the background service to apply config changes.
 func reloadService() {
 	fmt.Println("⚙️  Applying changes...")
 
@@ -397,24 +394,19 @@ func reloadService() {
 	var restartCmd string
 
 	if runtime.GOOS == "windows" {
-		// Windows: Requires Admin privileges to run this
-		cmd = exec.Command("powershell", "-Command", "Restart-Service", "HarborLighthouse")
-		restartCmd = "Restart-Service HarborLighthouse (Run as Admin)"
+		cmd = exec.Command("powershell", "-Command", "Restart-Service", ServiceName)
+		restartCmd = fmt.Sprintf("Restart-Service %s (Run as Admin)", ServiceName)
 	} else {
-		// Linux/Mac
-		cmd = exec.Command("sudo", "systemctl", "restart", "HarborLighthouse")
-		restartCmd = "sudo lighthouse --install"
+		cmd = exec.Command("sudo", "systemctl", "restart", ServiceName)
+		restartCmd = fmt.Sprintf("sudo %s --install", BinaryName)
 	}
 
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("⚠️  Could not auto-restart service: %v\n", err)
-
 		if runtime.GOOS == "windows" {
-			fmt.Println("👉 NOTE: On Windows, you must run your terminal as Administrator to restart the service automatically.")
-			fmt.Println("👉 Manual Fix: Open PowerShell as Admin and run: Restart-Service HarborLighthouse")
-		} else {
-			fmt.Printf("👉 Manual Fix: Run '%s'\n", restartCmd)
+			fmt.Println("👉 NOTE: Run terminal as Administrator to restart automatically.")
 		}
+		fmt.Printf("👉 Manual Fix: Run '%s'\n", restartCmd)
 	} else {
 		fmt.Println("♻️  Service restarted successfully!")
 	}

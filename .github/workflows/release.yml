@@ -3,48 +3,63 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*" # Triggers only on version tags (e.g., v1.0.0)
 
 jobs:
   build:
+    name: Build & Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
+      contents: write # Required to create the Release
 
-      - name: Get dependencies
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Get Dependencies
         run: |
           go mod tidy
-          # Ensure cross-compilation deps if needed
 
       - name: Build Binaries
         run: |
-          # Inject the Git Tag into the Version variable
-          LDFLAGS="-s -w -X main.Version=${GITHUB_REF#refs/tags/}"
+          # 1. Capture Version from Tag (e.g., v1.0.0)
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Building Version: $VERSION"
 
-          echo "Building Linux AMD64..."
-          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-amd64 cmd/lighthouse/main.go
+          # 2. Set Linker Flags
+          # -s -w: Strip debug symbols (smaller binary)
+          # -X: Inject version variable into main.go
+          LDFLAGS="-s -w -X main.Version=$VERSION"
 
-          echo "Building Linux ARM64 (Pi)..."
-          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-arm64 cmd/lighthouse/main.go
+          # 3. Compile for all targets
 
-          echo "Building Windows..."
-          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-windows.exe cmd/lighthouse/main.go
 
-          echo "Building Darwin (Mac)..."
-          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-darwin-arm64 cmd/lighthouse/main.go
+          echo "🐧 Building Linux AMD64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-amd64 ./cmd/lighthouse
 
-      - name: Create Release
+          echo "🥧 Building Linux ARM64 (Pi)..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-linux-arm64 ./cmd/lighthouse
+
+          echo "🪟 Building Windows..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o lighthouse-windows-amd64.exe ./cmd/lighthouse
+
+          echo "🍏 Building Darwin (Mac M1/M2)..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o lighthouse-darwin-arm64 ./cmd/lighthouse
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
+          generate_release_notes: true
           files: |
             lighthouse-linux-amd64
             lighthouse-linux-arm64
-            lighthouse-windows.exe
+            lighthouse-windows-amd64.exe
             lighthouse-darwin-arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

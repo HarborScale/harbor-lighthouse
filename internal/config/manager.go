@@ -5,9 +5,55 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
-const ConfigFileName = "lighthouse_config.json"
+const (
+	ConfigFileName = "config.json"
+)
+
+var (
+	// Public variables so main.go and status.go can read them
+	GlobalDir     string
+	GlobalLogPath string
+)
+
+// Initialize calculates the paths based on OS and creates directories.
+// It is called once at the start of main().
+func Initialize() {
+	if runtime.GOOS == "windows" {
+		// C:\ProgramData\HarborLighthouse
+		GlobalDir = filepath.Join(os.Getenv("ProgramData"), "HarborLighthouse")
+	} else {
+		// /etc/harbor-lighthouse
+		GlobalDir = "/etc/harbor-lighthouse"
+	}
+
+	// Try to create the system directory.
+	// If this fails (e.g. running as non-root), we FALLBACK to local directory.
+	err := os.MkdirAll(GlobalDir, 0755)
+	if err != nil {
+		// FALLBACK MODE (Dev/User)
+		wd, _ := os.Getwd()
+		GlobalDir = wd
+	}
+
+	// Set the Log Path based on the decided directory
+	if runtime.GOOS == "windows" {
+		GlobalLogPath = filepath.Join(GlobalDir, "harbor-lighthouse.log")
+	} else {
+		// On Linux, try /var/log first because it's standard
+		varLog := "/var/log/harbor-lighthouse.log"
+		f, err := os.OpenFile(varLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			f.Close()
+			GlobalLogPath = varLog
+		} else {
+			// If we can't write to /var/log (no sudo), write to the config dir
+			GlobalLogPath = filepath.Join(GlobalDir, "harbor-lighthouse.log")
+		}
+	}
+}
 
 type Instance struct {
 	Name         string            `json:"name"`
@@ -26,31 +72,34 @@ type Config struct {
 	Instances  []Instance `json:"instances"`
 }
 
-// getConfigPath returns the absolute path to the config file
-// located next to the running binary.
-func getConfigPath() string {
-	exePath, err := os.Executable()
-	if err != nil {
-		// Fallback to current directory if we can't find self (rare)
-		return ConfigFileName
+// GetPath returns the absolute path to the config file using the GlobalDir
+func GetPath() string {
+	if GlobalDir == "" {
+		Initialize()
 	}
-	return filepath.Join(filepath.Dir(exePath), ConfigFileName)
+	return filepath.Join(GlobalDir, ConfigFileName)
 }
 
 func Load() (Config, error) {
-	c := Config{AutoUpdate: true, Instances: []Instance{}}
+	c := Config{
+		AutoUpdate: true,
+		Instances:  []Instance{},
+	}
 
-	path := getConfigPath()
+	path := GetPath()
 	data, err := os.ReadFile(path)
 
 	if os.IsNotExist(err) {
 		return c, nil
 	}
 	if err != nil {
-		return c, err
+		return c, fmt.Errorf("failed to read config at %s: %w", path, err)
 	}
 
-	err = json.Unmarshal(data, &c)
+	if err := json.Unmarshal(data, &c); err != nil {
+		return c, fmt.Errorf("config parse error: %w", err)
+	}
+
 	return c, nil
 }
 
@@ -60,8 +109,11 @@ func Save(c Config) error {
 		return err
 	}
 
-	path := getConfigPath()
-	return os.WriteFile(path, data, 0o644)
+	path := GetPath()
+	// Ensure the directory exists (it should, but safety first)
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+
+	return os.WriteFile(path, data, 0644)
 }
 
 func (c *Config) Add(n Instance) error {
