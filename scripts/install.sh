@@ -1,5 +1,5 @@
 #!/bin/bash
-VERSION="v0.1.0"
+VERSION="v0.1.1"
 REPO="harborscale/harbor-lighthouse"
 
 # --- 🗑️ UNINSTALL MODE ---
