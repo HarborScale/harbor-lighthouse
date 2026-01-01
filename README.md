@@ -17,7 +17,6 @@ Copy and paste this into your terminal:
 
 ```bash
 curl -sL get.harborscale.com | sudo bash
-
 ```
 
 ### 🪟 Windows (PowerShell)
@@ -26,7 +25,6 @@ Open PowerShell as Administrator and run:
 
 ```powershell
 iwr get.harborscale.com | iex
-
 ```
 
 > **Note:** This installs Lighthouse as a system service. It will start automatically on boot.
@@ -47,7 +45,6 @@ lighthouse --add \
   --harbor-id "123" \
   --key "hs_live_key_xxx" \
   --source linux
-
 ```
 
 ### 2. Add a Monitor (Self-Hosted / OSS) 🏠
@@ -60,7 +57,6 @@ lighthouse --add \
   --endpoint "http://192.168.1.50:8000" \
   --key "your_oss_api_key" \
   --source linux
-
 ```
 
 > **Note:** When using `--endpoint`, the `--harbor-id` flag is optional.
@@ -76,7 +72,6 @@ lighthouse --add \
   --key "hs_live_key_xxx" \
   --source exec \
   --param command="python3 /opt/weather.py"
-
 ```
 
 ### 4. Manage the Agent
@@ -102,7 +97,7 @@ When running `lighthouse --add`, you can use these flags to customize behavior:
 | `--harbor-id` | ☁️ Cloud | Your Harbor ID (Required for Cloud). | - |
 | `--endpoint` | 🏠 OSS | Custom API URL (Required for Self-Hosted). | `https://harborscale.com` |
 | `--key` | ❌ No | Your API Key. | - |
-| `--source` | ✅ Yes | Which collector to use (`linux`, `exec`, `uptime`, `docker`, `meshtastic`). | `linux` |
+| `--source` | ✅ Yes | Which collector to use (`linux`, `ollama`, `starlink`, `exec`, `uptime`, `docker`, `meshtastic`). | `linux` |
 | `--interval` | ❌ No | How often to collect data (in seconds). | `60` |
 | `--batch-size` | ❌ No | Max number of metrics to send in one HTTP request. | `100` |
 | `--param` | ❌ No | Pass specific settings to a collector (e.g., `--param target_url=...`). | - |
@@ -145,6 +140,8 @@ lighthouse --add \
 ```
 
 * **Requirement:** The user running Lighthouse must have permission to access `/var/run/docker.sock` (usually the `docker` group).
+
+
 
 ### 3. HTTP Uptime (`uptime`)
 
@@ -208,6 +205,41 @@ lighthouse --add \
 * `--port <port>`: Force specific USB serial port (e.g., `/dev/ttyUSB0` or `COM3`).
 
 
+### 5. AI Agent (`ollama`)
+
+Monitors your local LLM farm. Perfect for tracking VRAM usage and model loading status on Ollama or DeepSeek.
+
+* **Usage:** `--source ollama`
+* **Optional Params:**
+* `url`: Custom API URL (default: `http://localhost:11434`).
+
+
+* **Metrics:**
+* `ollama_up` (0/1): Is the service running?
+* `ollama_vram_usage_mb`: Total GPU memory used by loaded models.
+* `ollama_models_loaded`: Number of active models in memory.
+* `ollama_latency_ms`: API response time.
+
+
+
+### 6. Starlink Dish (`starlink`)
+
+Connects to your local Starlink dish to track signal health, storms, and obstructions.
+
+* **Usage:** `--source starlink`
+* **Optional Params:**
+* `url`: Custom Dishy URL (default: `http://192.168.100.1/api/get_status_data`).
+
+
+* **Metrics:**
+* `starlink_obstruction_pct`: Percentage of sky view blocked by trees/buildings.
+* `starlink_latency_ms`: Ping time to the Starlink satellite/POP.
+* `starlink_downlink_mbps`: Estimated download capacity.
+* `starlink_uplink_mbps`: Estimated upload capacity.
+* `starlink_packet_loss_pct`: Connection stability (Packet drops).
+
+
+
 ---
 
 ## 🛠️ Deep Dive: Custom Scripts (`exec`)
@@ -225,7 +257,6 @@ Your script prints a single JSON object. Lighthouse assigns the `--name` you con
   "temperature": 24.5,
   "humidity": 60
 }
-
 ```
 
 ### Mode B: Many Ships (Advanced)
@@ -245,7 +276,6 @@ Your script acts as a gateway for multiple devices. It prints a JSON **Array** `
     "temperature": 25.5
   }
 ]
-
 ```
 
 > **Note:** If you provide `ship_id` in the JSON, it overrides the `--name` flag for that specific data point.
@@ -261,7 +291,6 @@ Your script acts as a gateway for multiple devices. It prints a JSON **Array** `
 ```bash
 git clone https://github.com/harborscale/harbor-lighthouse.git
 cd harbor-lighthouse
-
 ```
 
 2. **Build:**
@@ -272,7 +301,6 @@ go build -o lighthouse cmd/lighthouse/main.go
 
 # Windows
 GOOS=windows GOARCH=amd64 go build -o lighthouse.exe cmd/lighthouse/main.go
-
 ```
 
 ---
@@ -280,3 +308,5 @@ GOOS=windows GOARCH=amd64 go build -o lighthouse.exe cmd/lighthouse/main.go
 ## 📄 License
 
 MIT License. Built with ❤️ for the Harbor Scale Community.
+
+

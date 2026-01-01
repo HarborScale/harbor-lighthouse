@@ -16,6 +16,10 @@ func Get(name string) (Collector, error) {
 		return UptimeCollector, nil
 	case "docker":
 		return DockerCollector, nil
+	case "ollama", "llm", "ai":
+    return OllamaCollector, nil
+  case "starlink", "dishy":
+    return StarlinkCollector, nil
 	default:
 		return nil, fmt.Errorf("unknown source: %s", name)
 	}
