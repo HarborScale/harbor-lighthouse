@@ -49,7 +49,6 @@ func UptimeCollector(params map[string]string) ([]map[string]interface{}, error)
 		statusCode = int64(resp.StatusCode)
 	}
 
-	// ✅ FIX: Wrap the map in a slice
 	return []map[string]interface{}{
 		{
 			"http_up":          up,

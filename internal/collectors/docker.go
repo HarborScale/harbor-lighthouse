@@ -47,7 +47,6 @@ func DockerCollector(params map[string]string) ([]map[string]interface{}, error)
 	// 4. Fetch Engine Info
 	info, err := cli.Info(ctx)
 	if err != nil {
-		// ✅ FIX: Return slice with basic data
 		return []map[string]interface{}{
 			{
 				"docker_containers_total":   total,
@@ -58,7 +57,6 @@ func DockerCollector(params map[string]string) ([]map[string]interface{}, error)
 		}, nil
 	}
 
-	// ✅ FIX: Return slice with full data
 	return []map[string]interface{}{
 		{
 			"docker_containers_total":   total,
