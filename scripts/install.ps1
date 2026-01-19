@@ -1,6 +1,6 @@
 param(
     [switch]$Uninstall,
-    [string]$Version = "v0.1.4" # Default version
+    [string]$Version = "v0.1.5" # Default version
 )
 
 $Repo = "harborscale/harbor-lighthouse"
