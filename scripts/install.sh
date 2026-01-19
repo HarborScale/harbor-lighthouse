@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="v0.1.4"
+VERSION="v0.1.5"
 REPO="harborscale/harbor-lighthouse"
 BINARY_NAME="lighthouse"
 INSTALL_PATH="/usr/local/bin/$BINARY_NAME"
