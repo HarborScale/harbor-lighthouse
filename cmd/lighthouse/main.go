@@ -92,7 +92,11 @@ func main() {
 	if *autoUpdate != "" {
 		cfg, _ := config.Load()
 		cfg.AutoUpdate = (*autoUpdate == "true")
-		config.Save(cfg)
+		
+		if err := config.Save(cfg); err != nil {
+			log.Fatalf("❌ Failed to save config: %v (Try running with sudo)", err)
+		}
+		
 		fmt.Printf("✅ Auto-Update set to: %v\n", cfg.AutoUpdate)
 		return
 	}
@@ -154,6 +158,11 @@ func main() {
 		if err := cfg.Add(instance); err != nil {
 			log.Fatal("❌", err)
 		}
+		
+		if err := config.Save(cfg); err != nil {
+			log.Fatalf("❌ Failed to save config: %v (Try running with sudo)", err)
+		}
+		
 		config.Save(cfg)
 		fmt.Println("✅ Added instance.")
 		reloadService()
@@ -163,7 +172,11 @@ func main() {
 	if *remove != "" {
 		cfg, _ := config.Load()
 		if cfg.Remove(*remove) {
-			config.Save(cfg)
+			
+			if err := config.Save(cfg); err != nil {
+				log.Fatalf("❌ Failed to save config: %v (Try running with sudo)", err)
+			}
+			
 			fmt.Println("🗑️ Removed instance.")
 			reloadService()
 		} else {
