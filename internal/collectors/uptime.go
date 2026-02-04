@@ -29,6 +29,7 @@ func UptimeCollector(params map[string]string) ([]map[string]interface{}, error)
 
 	// 3. Timing variables for detailed metrics
 	var dnsStart, dnsDone, connectStart, connectDone, tlsStart, tlsDone, firstByteTime time.Time
+	var redirectCount int64 = 0
 
 	// 4. Create HTTP trace for detailed timing
 	trace := &httptrace.ClientTrace{
@@ -55,11 +56,12 @@ func UptimeCollector(params map[string]string) ([]map[string]interface{}, error)
 		},
 	}
 
-	// 5. Client Setup: Use a custom client to enforce timeouts
+	// 5. Client Setup: Custom client with redirect counting
 	client := &http.Client{
 		Timeout: timeoutDuration,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
+		    redirectCount = int64(len(via))
+		    return http.ErrUseLastResponse 
 		},
 	}
 
@@ -77,26 +79,25 @@ func UptimeCollector(params map[string]string) ([]map[string]interface{}, error)
 
 	// 8. Initialize result with default values (all numeric)
 	result := map[string]interface{}{
-		"http_up":              int64(0),
-		"http_latency_ms":      totalDuration,
-		"http_status_code":     int64(0),
-		"http_dns_lookup_ms":   int64(0),
-		"http_tcp_connect_ms":  int64(0),
-		"http_tls_handshake_ms": int64(0),
-		"http_ttfb_ms":         int64(0),
-		"http_download_ms":     int64(0),
+		"http_up":                  int64(0),
+		"http_latency_ms":          totalDuration,
+		"http_status_code":         int64(0),
+		"http_dns_lookup_ms":       int64(0),
+		"http_tcp_connect_ms":      int64(0),
+		"http_tls_handshake_ms":    int64(0),
+		"http_ttfb_ms":             int64(0),
+		"http_download_ms":         int64(0),
 		"http_response_size_bytes": int64(0),
-		"http_redirect_count":  int64(0),
-		"http_cache_hit":       int64(0),
+		"http_redirect_count":      redirectCount,
+		"http_cache_hit":           int64(0),
 	}
 
 	// 9. Process successful response
 	if err == nil {
 		defer resp.Body.Close()
-		
+
 		result["http_up"] = int64(1)
 		result["http_status_code"] = int64(resp.StatusCode)
-		result["http_redirect_count"] = int64(len(resp.History))
 
 		// Calculate DNS lookup time
 		if !dnsStart.IsZero() && !dnsDone.IsZero() {
@@ -116,7 +117,7 @@ func UptimeCollector(params map[string]string) ([]map[string]interface{}, error)
 		// Calculate Time to First Byte (TTFB)
 		if !firstByteTime.IsZero() {
 			result["http_ttfb_ms"] = firstByteTime.Sub(start).Milliseconds()
-			
+
 			// Calculate download time (total - TTFB)
 			downloadTime := totalDuration - firstByteTime.Sub(start).Milliseconds()
 			if downloadTime > 0 {
@@ -154,7 +155,7 @@ func getCacheStatus(headers http.Header) string {
 		"x-netlify-cache",
 		"x-cache-status",
 	}
-	
+
 	for _, header := range cacheHeaders {
 		if val := headers.Get(header); val != "" {
 			return val
