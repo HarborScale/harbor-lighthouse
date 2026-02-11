@@ -207,6 +207,7 @@ lighthouse --add --name "meshtastic-gateway" --harbor-id "123" --key "hs_live_ke
 * **Optional Params:**
 * `--ttl <seconds>`: Ignore nodes not heard from in X seconds (Default: 3600).
 * `--port <port>`: Force specific USB serial port (e.g., `/dev/ttyUSB0` on Linux or `COM3` on Windows).
+* `--host <ip>`: Connect via Wi-Fi/TCP instead of USB (e.g., `192.168.1.50`).
 
 
 ---
