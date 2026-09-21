@@ -8,6 +8,7 @@ require (
 	github.com/kardianos/service v1.2.4
 	github.com/rhysd/go-github-selfupdate v1.2.3
 	github.com/shirou/gopsutil/v3 v3.24.5
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

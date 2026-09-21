@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/natefinch/lumberjack.v2"
+
 	"github.com/harborscale/harbor-lighthouse/internal/collectors"
 	"github.com/harborscale/harbor-lighthouse/internal/config"
 	"github.com/harborscale/harbor-lighthouse/internal/engine"
@@ -336,14 +338,34 @@ func worker(inst config.Instance) {
 	}
 }
 
+// bestEffort wraps a writer so a failing destination cannot silence the
+// others in an io.MultiWriter. MultiWriter aborts on the first writer that
+// returns an error, so with a bare (os.Stdout, file) pair a Windows service
+// -- which has no console, and whose stdout handle is therefore invalid --
+// would drop every line before it ever reached the log file. Reporting a
+// full successful write keeps the remaining writers in the chain running.
+type bestEffort struct{ w io.Writer }
+
+func (b bestEffort) Write(p []byte) (int, error) {
+	_, _ = b.w.Write(p)
+	return len(p), nil
+}
+
 func setupLogging() {
-	// Use the centralized config variable
-	f, err := os.OpenFile(config.GlobalLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		fmt.Printf("⚠️ Could not open log file %s: %v\n", config.GlobalLogPath, err)
-		return
+	// Rotate the log so a long-running service cannot fill the disk.
+	// The previous implementation opened the file with O_APPEND and never
+	// truncated it, so on any persistent error (unreachable harbor, bad API
+	// key, rate limiting) the per-cycle error lines grew without bound.
+	// Caps usage at MaxSize + MaxBackups compressed files.
+	rotating := &lumberjack.Logger{
+		Filename:   config.GlobalLogPath,
+		MaxSize:    10, // megabytes per file before rotating
+		MaxBackups: 3,  // retained rotated files
+		MaxAge:     28, // days
+		Compress:   true,
 	}
-	log.SetOutput(io.MultiWriter(os.Stdout, f))
+
+	log.SetOutput(io.MultiWriter(bestEffort{os.Stdout}, bestEffort{rotating}))
 }
 
 func showStatus() {
